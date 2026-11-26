@@ -1,0 +1,119 @@
+@import "tailwindcss";
+
+:root {
+  --brand-purple: #8b3dff;
+  --brand-blue: #0ea5e9;
+  --brand-gradient: linear-gradient(135deg, #8b3dff 0%, #0ea5e9 100%);
+  --surface-bg: #fafafa;
+  --surface-card: #ffffff;
+  --surface-border: #e4e4e7;
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #a1a1aa;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--surface-bg);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Gradient text utility */
+.gradient-text {
+  background: var(--brand-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Checkerboard background for transparency preview */
+.checkerboard {
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(45deg, #c8c8c8 25%, transparent 25%),
+    linear-gradient(-45deg, #c8c8c8 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #c8c8c8 75%),
+    linear-gradient(-45deg, transparent 75%, #c8c8c8 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f4f4f5;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d4d4d8;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a1a1aa;
+}
+
+/* Smooth transitions for interactive elements */
+button, a, input, select {
+  transition: all 0.2s ease;
+}
+
+/* Focus outline */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--brand-purple);
+  outline-offset: 2px;
+}
+
+/* Glass morphism card effect */
+.glass-card {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+/* Drag area animation */
+@keyframes borderDash {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+/* Loading shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, #f4f4f5 25%, #e4e4e7 50%, #f4f4f5 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Brand glow effect */
+.brand-glow {
+  box-shadow: 0 0 20px rgba(139, 61, 255, 0.25), 0 0 60px rgba(139, 61, 255, 0.1);
+}
+
+/* Konva canvas container */
+.konva-container canvas {
+  display: block;
+}
