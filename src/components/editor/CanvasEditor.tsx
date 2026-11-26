@@ -113,9 +113,17 @@ interface CanvasEditorProps {
   containerWidth: number
   containerHeight: number
   stageRef?: React.RefObject<any>
+  magicSelectMode?: boolean
+  onMagicPointClick?: (x: number, y: number) => void
 }
 
-export default function CanvasEditor({ containerWidth, containerHeight, stageRef: externalStageRef }: CanvasEditorProps) {
+export default function CanvasEditor({
+  containerWidth,
+  containerHeight,
+  stageRef: externalStageRef,
+  magicSelectMode = false,
+  onMagicPointClick,
+}: CanvasEditorProps) {
   const { layers, selectedLayerId, setSelectedLayerId, canvasWidth, canvasHeight } =
     useEditorStore()
 
@@ -149,11 +157,19 @@ export default function CanvasEditor({ containerWidth, containerHeight, stageRef
 
   const handleStageClick = useCallback(
     (e: any) => {
+      if (magicSelectMode && onMagicPointClick) {
+        const stage = e.target.getStage()
+        const pos = stage?.getPointerPosition()
+        if (pos) {
+          onMagicPointClick(pos.x / scale, pos.y / scale)
+        }
+        return
+      }
       if (e.target === e.target.getStage() || e.target.getClassName() === 'Rect') {
         setSelectedLayerId(null)
       }
     },
-    [setSelectedLayerId]
+    [magicSelectMode, onMagicPointClick, scale, setSelectedLayerId]
   )
 
   const selectedLayer = layers.find((l) => l.id === selectedLayerId)
@@ -172,6 +188,7 @@ export default function CanvasEditor({ containerWidth, containerHeight, stageRef
         style={{
           width: scaledWidth,
           height: scaledHeight,
+          cursor: magicSelectMode ? 'crosshair' : 'default',
         }}
       >
         <Stage

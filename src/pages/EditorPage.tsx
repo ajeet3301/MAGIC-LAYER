@@ -13,7 +13,7 @@ import {
   Home,
   Trash2,
   Copy,
-  Plus,
+  Wand2,
 } from 'lucide-react'
 import JSZip from 'jszip'
 import CanvasEditor from '../components/editor/CanvasEditor'
@@ -22,6 +22,7 @@ import PropertiesPanel from '../components/editor/PropertiesPanel'
 import ProcessingOverlay from '../components/upload/ProcessingOverlay'
 import { useEditorStore } from '../store/editorStore'
 import { useOCR } from '../hooks/useOCR'
+import { useSAM } from '../hooks/useSAM'
 import { exportLayersToPsd } from '../utils/exportPsd'
 
 type ExportFormat = 'png' | 'jpg' | 'psd' | 'zip'
@@ -66,6 +67,9 @@ export default function EditorPage() {
   const stageRef = useRef<any>(null)
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 })
   const [showExportMenu, setShowExportMenu] = useState(false)
+  const [magicSelectMode, setMagicSelectMode] = useState(false)
+
+  const { extractAtPoint } = useSAM()
 
   const {
     layers,
@@ -270,6 +274,15 @@ export default function EditorPage() {
           </>
         )}
 
+        {/* Magic Select (SAM) */}
+        <ToolbarButton
+          icon={Wand2}
+          label="Magic Select"
+          active={magicSelectMode}
+          onClick={() => setMagicSelectMode((v) => !v)}
+          disabled={isProcessing}
+        />
+
         {/* OCR */}
         <ToolbarButton
           icon={ScanText}
@@ -339,6 +352,11 @@ export default function EditorPage() {
             containerWidth={containerSize.width}
             containerHeight={containerSize.height}
             stageRef={stageRef}
+            magicSelectMode={magicSelectMode}
+            onMagicPointClick={async (x, y) => {
+              await extractAtPoint(x, y)
+              setMagicSelectMode(false)
+            }}
           />
 
           {/* Pass stage ref from child — workaround via context or callback ref */}
