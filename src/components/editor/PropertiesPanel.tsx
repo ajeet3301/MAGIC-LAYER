@@ -133,8 +133,8 @@ export default function PropertiesPanel() {
               onClick={() => update({ locked: !selectedLayer.locked })}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex-1 justify-center ${
                 selectedLayer.locked
-                  ? 'border-purple-200 bg-purple-50 text-purple-700'
-                  : 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100'
+                  ? 'border-black bg-black text-white'
+                  : 'border-neutral-200 bg-neutral-50 text-neutral-700 hover:bg-neutral-100'
               }`}
             >
               {selectedLayer.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
@@ -155,7 +155,7 @@ export default function PropertiesPanel() {
                 value={selectedLayer.text ?? ''}
                 onChange={(e) => update({ text: e.target.value })}
                 rows={3}
-                className="w-full text-xs text-zinc-700 bg-zinc-50 border border-zinc-200 rounded-lg px-2 py-1.5 outline-none focus:border-purple-400 resize-none"
+                className="w-full text-xs text-neutral-800 bg-neutral-50 border border-neutral-200 rounded-lg px-2 py-1.5 outline-none focus:border-black resize-none"
               />
             </div>
 
@@ -175,8 +175,8 @@ export default function PropertiesPanel() {
                 onClick={() => update({ fontWeight: selectedLayer.fontWeight === 'bold' ? '400' : 'bold' })}
                 className={`p-1.5 rounded-lg border text-xs transition-colors ${
                   selectedLayer.fontWeight === 'bold'
-                    ? 'border-purple-300 bg-purple-50 text-purple-700'
-                    : 'border-zinc-200 bg-zinc-50 text-zinc-500 hover:bg-zinc-100'
+                    ? 'border-black bg-black text-white'
+                    : 'border-neutral-200 bg-neutral-50 text-neutral-600 hover:bg-neutral-100'
                 }`}
               >
                 <Bold className="w-3.5 h-3.5" />
@@ -209,8 +209,8 @@ export default function PropertiesPanel() {
                       onClick={() => update({ textAlign: align })}
                       className={`p-1.5 rounded-lg border transition-colors ${
                         selectedLayer.textAlign === align
-                          ? 'border-purple-300 bg-purple-50 text-purple-700'
-                          : 'border-zinc-200 bg-zinc-50 text-zinc-500 hover:bg-zinc-100'
+                          ? 'border-black bg-black text-white'
+                          : 'border-neutral-200 bg-neutral-50 text-neutral-600 hover:bg-neutral-100'
                       }`}
                     >
                       <Icon className="w-3.5 h-3.5" />

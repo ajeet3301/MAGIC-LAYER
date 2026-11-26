@@ -112,13 +112,15 @@ function TextElement({
 interface CanvasEditorProps {
   containerWidth: number
   containerHeight: number
+  stageRef?: React.RefObject<any>
 }
 
-export default function CanvasEditor({ containerWidth, containerHeight }: CanvasEditorProps) {
+export default function CanvasEditor({ containerWidth, containerHeight, stageRef: externalStageRef }: CanvasEditorProps) {
   const { layers, selectedLayerId, setSelectedLayerId, canvasWidth, canvasHeight } =
     useEditorStore()
 
-  const stageRef = useRef<any>(null)
+  const internalStageRef = useRef<any>(null)
+  const stageRef = externalStageRef ?? internalStageRef
   const trRef = useRef<any>(null)
   const [scale, setScale] = useState(1)
 
@@ -235,9 +237,9 @@ export default function CanvasEditor({ containerWidth, containerHeight }: Canvas
                 if (Math.abs(newBox.width) < 5 || Math.abs(newBox.height) < 5) return oldBox
                 return newBox
               }}
-              borderStroke="#8b3dff"
+              borderStroke="#000000"
               borderStrokeWidth={1.5}
-              anchorStroke="#8b3dff"
+              anchorStroke="#000000"
               anchorFill="white"
               anchorSize={8}
             />

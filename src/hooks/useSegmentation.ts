@@ -1,153 +1,436 @@
 import { useCallback, useRef } from 'react'
 import { useEditorStore } from '../store/editorStore'
-import type { LayerItem, SegmentedObject } from '../types'
+import type { LayerItem } from '../types'
 
-function generateId() {
-  return `layer-${Date.now()}-${Math.random().toString(36).slice(2)}`
+function generateId(prefix = 'layer') {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 /**
- * Canvas-based image segmentation using edge detection + color clustering.
- * This is a client-side, no-AI fallback that works on all devices.
- * It analyzes the image using pixel data to identify distinct visual regions.
+ * Multi-scale pyramid diffusion inpainting.
+ * Reconstructs missing background pixels where `mask[i] === 1` while
+ * keeping all unmasked (`mask[i] === 0`) original pixels untouched.
  */
-function clusterImageRegions(
-  canvas: HTMLCanvasElement,
-  numRegions: number = 4
-): SegmentedObject[] {
-  const ctx = canvas.getContext('2d')!
-  const { width, height } = canvas
-  const imageData = ctx.getImageData(0, 0, width, height)
-  const data = imageData.data
+function inpaintBackground(
+  origData: Uint8ClampedArray,
+  mask: Uint8Array,
+  width: number,
+  height: number
+): ImageData {
+  // Work at a fast pyramid base (max 320px) for structure, then refine at full res
+  const maxDim = 320
+  const scale = Math.min(1, maxDim / Math.max(width, height))
+  const sw = Math.max(16, Math.round(width * scale))
+  const sh = Math.max(16, Math.round(height * scale))
 
-  // Sample pixels at regular intervals to find dominant colors
-  const step = Math.max(1, Math.floor(Math.sqrt((width * height) / 1000)))
-  const colorSamples: number[][] = []
+  const sR = new Float32Array(sw * sh)
+  const sG = new Float32Array(sw * sh)
+  const sB = new Float32Array(sw * sh)
+  const sKnown = new Uint8Array(sw * sh)
 
-  for (let y = 0; y < height; y += step) {
-    for (let x = 0; x < width; x += step) {
-      const i = (y * width + x) * 4
-      colorSamples.push([data[i], data[i + 1], data[i + 2]])
-    }
-  }
-
-  // Simple k-means clustering to find color groups
-  const k = Math.min(numRegions, 6)
-  const centroids = colorSamples
-    .sort(() => Math.random() - 0.5)
-    .slice(0, k)
-    .map((c) => [...c])
-
-  // 5 iterations of k-means
-  for (let iter = 0; iter < 5; iter++) {
-    const clusters: number[][][] = Array.from({ length: k }, () => [])
-
-    for (const sample of colorSamples) {
-      let minDist = Infinity
-      let nearest = 0
-      for (let j = 0; j < k; j++) {
-        const d =
-          (sample[0] - centroids[j][0]) ** 2 +
-          (sample[1] - centroids[j][1]) ** 2 +
-          (sample[2] - centroids[j][2]) ** 2
-        if (d < minDist) {
-          minDist = d
-          nearest = j
-        }
-      }
-      clusters[nearest].push(sample)
-    }
-
-    for (let j = 0; j < k; j++) {
-      if (clusters[j].length > 0) {
-        centroids[j] = [
-          clusters[j].reduce((s, c) => s + c[0], 0) / clusters[j].length,
-          clusters[j].reduce((s, c) => s + c[1], 0) / clusters[j].length,
-          clusters[j].reduce((s, c) => s + c[2], 0) / clusters[j].length,
-        ]
+  // Downsample known pixels into coarse buffer
+  for (let y = 0; y < sh; y++) {
+    const oy = Math.min(height - 1, Math.floor((y / sh) * height))
+    for (let x = 0; x < sw; x++) {
+      const ox = Math.min(width - 1, Math.floor((x / sw) * width))
+      const oi = oy * width + ox
+      const si = y * sw + x
+      if (mask[oi] === 0) {
+        sKnown[si] = 1
+        sR[si] = origData[oi * 4]
+        sG[si] = origData[oi * 4 + 1]
+        sB[si] = origData[oi * 4 + 2]
       }
     }
   }
 
-  // Create masked canvases for each cluster
-  const results: SegmentedObject[] = []
-  const threshold = 60
+  // Iterative boundary-inward diffusion on coarse grid
+  const nextR = new Float32Array(sR)
+  const nextG = new Float32Array(sG)
+  const nextB = new Float32Array(sB)
+  const nextKnown = new Uint8Array(sKnown)
 
-  for (let j = 0; j < k; j++) {
-    const maskCanvas = document.createElement('canvas')
-    maskCanvas.width = width
-    maskCanvas.height = height
-    const maskCtx = maskCanvas.getContext('2d')!
-    const maskData = maskCtx.createImageData(width, height)
+  const dx = [-1, 0, 1, -1, 1, -1, 0, 1]
+  const dy = [-1, -1, -1, 0, 0, 1, 1, 1]
+  const dw = [0.7, 1, 0.7, 1, 1, 0.7, 1, 0.7]
 
-    let minX = width, minY = height, maxX = 0, maxY = 0
-    let pixelCount = 0
+  let remaining = 1
+  let iter = 0
+  while (remaining > 0 && iter < Math.max(sw, sh)) {
+    remaining = 0
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        const si = y * sw + x
+        if (sKnown[si] === 1) continue
 
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const i = (y * width + x) * 4
-        const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3]
+        let sumW = 0
+        let r = 0
+        let g = 0
+        let b = 0
+        for (let k = 0; k < 8; k++) {
+          const nx = x + dx[k]
+          const ny = y + dy[k]
+          if (nx >= 0 && nx < sw && ny >= 0 && ny < sh) {
+            const ni = ny * sw + nx
+            if (sKnown[ni] === 1) {
+              const w = dw[k]
+              sumW += w
+              r += sR[ni] * w
+              g += sG[ni] * w
+              b += sB[ni] * w
+            }
+          }
+        }
 
-        const dist = Math.sqrt(
-          (r - centroids[j][0]) ** 2 +
-          (g - centroids[j][1]) ** 2 +
-          (b - centroids[j][2]) ** 2
-        )
+        if (sumW > 0) {
+          nextR[si] = r / sumW
+          nextG[si] = g / sumW
+          nextB[si] = b / sumW
+          nextKnown[si] = 1
+        } else {
+          remaining++
+        }
+      }
+    }
+    sR.set(nextR)
+    sG.set(nextG)
+    sB.set(nextB)
+    sKnown.set(nextKnown)
+    iter++
+  }
 
-        if (dist < threshold && a > 10) {
-          maskData.data[i] = r
-          maskData.data[i + 1] = g
-          maskData.data[i + 2] = b
-          maskData.data[i + 3] = a
-          minX = Math.min(minX, x)
-          minY = Math.min(minY, y)
-          maxX = Math.max(maxX, x)
-          maxY = Math.max(maxY, y)
-          pixelCount++
+  // Smooth only the inpainted pixels (8 passes) for natural gradients
+  for (let pass = 0; pass < 8; pass++) {
+    for (let y = 1; y < sh - 1; y++) {
+      for (let x = 1; x < sw - 1; x++) {
+        const oy = Math.min(height - 1, Math.floor((y / sh) * height))
+        const ox = Math.min(width - 1, Math.floor((x / sw) * width))
+        if (mask[oy * width + ox] === 0) continue
+
+        const si = y * sw + x
+        let sumW = 0
+        let r = 0
+        let g = 0
+        let b = 0
+        for (let k = 0; k < 8; k++) {
+          const ni = (y + dy[k]) * sw + (x + dx[k])
+          const w = dw[k]
+          sumW += w
+          r += sR[ni] * w
+          g += sG[ni] * w
+          b += sB[ni] * w
+        }
+        nextR[si] = r / sumW
+        nextG[si] = g / sumW
+        nextB[si] = b / sumW
+      }
+    }
+    sR.set(nextR)
+    sG.set(nextG)
+    sB.set(nextB)
+  }
+
+  // Bilinear upscale back to full resolution & composite with unmasked original pixels
+  const out = new ImageData(width, height)
+  const outData = out.data
+
+  for (let y = 0; y < height; y++) {
+    const sy = (y / height) * (sh - 1)
+    const y0 = Math.floor(sy)
+    const y1 = Math.min(sh - 1, y0 + 1)
+    const fy = sy - y0
+
+    for (let x = 0; x < width; x++) {
+      const oi = y * width + x
+      const p = oi * 4
+
+      if (mask[oi] === 0) {
+        outData[p] = origData[p]
+        outData[p + 1] = origData[p + 1]
+        outData[p + 2] = origData[p + 2]
+        outData[p + 3] = 255
+        continue
+      }
+
+      const sx = (x / width) * (sw - 1)
+      const x0 = Math.floor(sx)
+      const x1 = Math.min(sw - 1, x0 + 1)
+      const fx = sx - x0
+
+      const i00 = y0 * sw + x0
+      const i10 = y0 * sw + x1
+      const i01 = y1 * sw + x0
+      const i11 = y1 * sw + x1
+
+      const w00 = (1 - fx) * (1 - fy)
+      const w10 = fx * (1 - fy)
+      const w01 = (1 - fx) * fy
+      const w11 = fx * fy
+
+      outData[p] = Math.round(sR[i00] * w00 + sR[i10] * w10 + sR[i01] * w01 + sR[i11] * w11)
+      outData[p + 1] = Math.round(sG[i00] * w00 + sG[i10] * w10 + sG[i01] * w01 + sG[i11] * w11)
+      outData[p + 2] = Math.round(sB[i00] * w00 + sB[i10] * w10 + sB[i01] * w01 + sB[i11] * w11)
+      outData[p + 3] = 255
+    }
+  }
+
+  return out
+}
+
+/**
+ * Dilate a binary mask by `radius` pixels to avoid halo fringes during inpainting.
+ */
+function dilateMask(mask: Uint8Array, width: number, height: number, radius: number): Uint8Array {
+  if (radius <= 0) return mask
+  const out = new Uint8Array(mask)
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (mask[y * width + x] === 1) {
+        const y0 = Math.max(0, y - radius)
+        const y1 = Math.min(height - 1, y + radius)
+        const x0 = Math.max(0, x - radius)
+        const x1 = Math.min(width - 1, x + radius)
+        for (let ny = y0; ny <= y1; ny++) {
+          for (let nx = x0; nx <= x1; nx++) {
+            out[ny * width + nx] = 1
+          }
+        }
+      }
+    }
+  }
+  return out
+}
+
+interface ComponentBox {
+  id: number
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+  area: number
+}
+
+/**
+ * Extract separate foreground object layers from an AI alpha-matted canvas
+ * using connected-component labeling on a bridged grid.
+ */
+function extractForegroundObjects(
+  fgData: Uint8ClampedArray,
+  origData: Uint8ClampedArray,
+  width: number,
+  height: number
+): LayerItem[] {
+  // Downscale for fast connected-component grouping (bridges 3-4px gaps)
+  const gridMax = 360
+  const scale = Math.min(1, gridMax / Math.max(width, height))
+  const gw = Math.max(16, Math.round(width * scale))
+  const gh = Math.max(16, Math.round(height * scale))
+
+  const binary = new Uint8Array(gw * gh)
+  for (let gy = 0; gy < gh; gy++) {
+    const oy = Math.min(height - 1, Math.floor((gy / gh) * height))
+    for (let gx = 0; gx < gw; gx++) {
+      const ox = Math.min(width - 1, Math.floor((gx / gw) * width))
+      if (fgData[(oy * width + ox) * 4 + 3] > 28) {
+        binary[gy * gw + gx] = 1
+      }
+    }
+  }
+
+  // Slight dilation (1px on grid) to keep limbs/edges of the same object unified
+  const bridged = dilateMask(binary, gw, gh, 1)
+
+  const labels = new Int32Array(gw * gh)
+  const components: ComponentBox[] = []
+  let currentLabel = 0
+
+  const queueX = new Int32Array(gw * gh)
+  const queueY = new Int32Array(gw * gh)
+
+  for (let y = 0; y < gh; y++) {
+    for (let x = 0; x < gw; x++) {
+      const idx = y * gw + x
+      if (bridged[idx] === 1 && labels[idx] === 0) {
+        currentLabel++
+        let head = 0
+        let tail = 0
+        queueX[tail] = x
+        queueY[tail] = y
+        tail++
+        labels[idx] = currentLabel
+
+        let minX = x
+        let minY = y
+        let maxX = x
+        let maxY = y
+        let area = 0
+
+        while (head < tail) {
+          const cx = queueX[head]
+          const cy = queueY[head]
+          head++
+          if (binary[cy * gw + cx] === 1) area++
+          if (cx < minX) minX = cx
+          if (cy < minY) minY = cy
+          if (cx > maxX) maxX = cx
+          if (cy > maxY) maxY = cy
+
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue
+              const nx = cx + dx
+              const ny = cy + dy
+              if (nx >= 0 && nx < gw && ny >= 0 && ny < gh) {
+                const nIdx = ny * gw + nx
+                if (bridged[nIdx] === 1 && labels[nIdx] === 0) {
+                  labels[nIdx] = currentLabel
+                  queueX[tail] = nx
+                  queueY[tail] = ny
+                  tail++
+                }
+              }
+            }
+          }
+        }
+
+        // Ignore tiny speckles (< 0.25% of grid area)
+        if (area >= gw * gh * 0.0025) {
+          components.push({
+            id: currentLabel,
+            minX,
+            minY,
+            maxX,
+            maxY,
+            area,
+          })
+        }
+      }
+    }
+  }
+
+  // Sort left-to-right so Object 1, Object 2... are intuitive
+  components.sort((a, b) => a.minX - b.minX)
+
+  const layers: LayerItem[] = []
+  const pad = Math.max(2, Math.round(4 / scale))
+
+  for (let i = 0; i < components.length; i++) {
+    const comp = components[i]
+    const x0 = Math.max(0, Math.floor((comp.minX / gw) * width) - pad)
+    const y0 = Math.max(0, Math.floor((comp.minY / gh) * height) - pad)
+    const x1 = Math.min(width - 1, Math.ceil(((comp.maxX + 1) / gw) * width) + pad)
+    const y1 = Math.min(height - 1, Math.ceil(((comp.maxY + 1) / gh) * height) + pad)
+
+    const bw = x1 - x0 + 1
+    const bh = y1 - y0 + 1
+    if (bw < 4 || bh < 4) continue
+
+    const cropCanvas = document.createElement('canvas')
+    cropCanvas.width = bw
+    cropCanvas.height = bh
+    const cropCtx = cropCanvas.getContext('2d')!
+    const cropImg = cropCtx.createImageData(bw, bh)
+    const out = cropImg.data
+
+    let hasVisiblePixels = false
+    for (let y = 0; y < bh; y++) {
+      const oy = y0 + y
+      const gy = Math.min(gh - 1, Math.floor((oy / height) * gh))
+      for (let x = 0; x < bw; x++) {
+        const ox = x0 + x
+        const gx = Math.min(gw - 1, Math.floor((ox / width) * gw))
+        const label = labels[gy * gw + gx]
+
+        const srcIdx = (oy * width + ox) * 4
+        const dstIdx = (y * bw + x) * 4
+        const alpha = fgData[srcIdx + 3]
+
+        if (label === comp.id && alpha > 12) {
+          out[dstIdx] = origData[srcIdx]
+          out[dstIdx + 1] = origData[srcIdx + 1]
+          out[dstIdx + 2] = origData[srcIdx + 2]
+          out[dstIdx + 3] = alpha
+          hasVisiblePixels = true
         }
       }
     }
 
-    // Skip very small regions (less than 2% of image)
-    if (pixelCount < (width * height * 0.02)) continue
-    if (minX >= maxX || minY >= maxY) continue
+    if (!hasVisiblePixels) continue
+    cropCtx.putImageData(cropImg, 0, 0)
 
-    maskCtx.putImageData(maskData, 0, 0)
-
-    const bboxW = maxX - minX + 1
-    const bboxH = maxY - minY + 1
-
-    // Crop to bounding box
-    const croppedCanvas = document.createElement('canvas')
-    croppedCanvas.width = bboxW
-    croppedCanvas.height = bboxH
-    croppedCanvas.getContext('2d')!.drawImage(maskCanvas, minX, minY, bboxW, bboxH, 0, 0, bboxW, bboxH)
-
-    const layerNames = ['Background', 'Foreground', 'Accent', 'Highlight', 'Detail', 'Shadow']
-
-    results.push({
-      id: generateId(),
-      name: layerNames[j] ?? `Region ${j + 1}`,
-      maskData: maskData.data,
-      bbox: { x: minX, y: minY, width: bboxW, height: bboxH },
-      imageDataUrl: croppedCanvas.toDataURL('image/png'),
+    layers.push({
+      id: generateId('obj'),
+      name: components.length === 1 ? 'Subject' : `Object ${i + 1}`,
+      type: 'image',
+      visible: true,
+      locked: false,
+      opacity: 1,
+      x: x0,
+      y: y0,
+      width: bw,
+      height: bh,
+      rotation: 0,
+      imageData: cropCanvas.toDataURL('image/png'),
     })
   }
 
-  return results
+  return layers
 }
 
 /**
- * Also create a "full image" base layer
+ * Sample dominant dark/light ink color inside a text bounding box.
  */
-function createFullImageLayer(canvas: HTMLCanvasElement, name: string): SegmentedObject {
-  return {
-    id: generateId(),
-    name,
-    maskData: new Uint8ClampedArray(canvas.width * canvas.height * 4),
-    bbox: { x: 0, y: 0, width: canvas.width, height: canvas.height },
-    imageDataUrl: canvas.toDataURL('image/png'),
+function sampleTextColor(
+  origData: Uint8ClampedArray,
+  width: number,
+  height: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number
+): string {
+  const cx0 = Math.max(0, Math.floor(x0))
+  const cy0 = Math.max(0, Math.floor(y0))
+  const cx1 = Math.min(width - 1, Math.ceil(x1))
+  const cy1 = Math.min(height - 1, Math.ceil(y1))
+
+  // Compute border average (background) vs center extremes (ink)
+  let bgR = 0, bgG = 0, bgB = 0, bgCount = 0
+  for (let x = cx0; x <= cx1; x++) {
+    for (const y of [cy0, cy1]) {
+      const i = (y * width + x) * 4
+      bgR += origData[i]
+      bgG += origData[i + 1]
+      bgB += origData[i + 2]
+      bgCount++
+    }
   }
+  if (bgCount === 0) return '#000000'
+  bgR /= bgCount
+  bgG /= bgCount
+  bgB /= bgCount
+
+  let maxDist = -1
+  let bestR = 0, bestG = 0, bestB = 0
+  const step = Math.max(1, Math.floor(((cx1 - cx0) * (cy1 - cy0)) / 400))
+  for (let y = cy0; y <= cy1; y += step) {
+    for (let x = cx0; x <= cx1; x += step) {
+      const i = (y * width + x) * 4
+      const dist =
+        (origData[i] - bgR) ** 2 +
+        (origData[i + 1] - bgG) ** 2 +
+        (origData[i + 2] - bgB) ** 2
+      if (dist > maxDist) {
+        maxDist = dist
+        bestR = origData[i]
+        bestG = origData[i + 1]
+        bestB = origData[i + 2]
+      }
+    }
+  }
+
+  const toHex = (n: number) => Math.round(n).toString(16).padStart(2, '0')
+  return `#${toHex(bestR)}${toHex(bestG)}${toHex(bestB)}`
 }
 
 export function useSegmentation() {
@@ -161,12 +444,11 @@ export function useSegmentation() {
 
       try {
         setProcessing({
-          status: 'processing',
-          message: 'Analyzing image…',
-          percentage: 10,
+          status: 'loading-model',
+          message: 'Loading AI segmentation model…',
+          percentage: 8,
         })
 
-        // Load image into canvas
         const imageUrl = URL.createObjectURL(file)
         setOriginalImageUrl(imageUrl)
 
@@ -179,75 +461,183 @@ export function useSegmentation() {
 
         if (abortRef.current) return false
 
-        const canvas = document.createElement('canvas')
-        canvas.width = img.naturalWidth
-        canvas.height = img.naturalHeight
-        const ctx = canvas.getContext('2d')!
-        ctx.drawImage(img, 0, 0)
+        const width = img.naturalWidth
+        const height = img.naturalHeight
+        setCanvasSize(width, height)
 
-        setCanvasSize(img.naturalWidth, img.naturalHeight)
+        const origCanvas = document.createElement('canvas')
+        origCanvas.width = width
+        origCanvas.height = height
+        const origCtx = origCanvas.getContext('2d')!
+        origCtx.drawImage(img, 0, 0)
+        const origImageData = origCtx.getImageData(0, 0, width, height)
+        const origData = origImageData.data
 
-        setProcessing({
-          status: 'processing',
-          message: 'Detecting visual regions…',
-          percentage: 30,
-        })
+        // Step 1: AI Foreground Segmentation using @imgly/background-removal
+        let fgData: Uint8ClampedArray | null = null
+        try {
+          const { removeBackground } = await import('@imgly/background-removal')
+          const fgBlob = await removeBackground(file, {
+            model: 'isnet_quint8',
+            output: { format: 'image/png' },
+            progress: (key: string, current: number, total: number) => {
+              if (abortRef.current) return
+              const pct = total > 0 ? Math.round((current / total) * 100) : 0
+              if (key.includes('fetch') || key.includes('download')) {
+                setProcessing({
+                  status: 'loading-model',
+                  message: 'Downloading AI model…',
+                  percentage: Math.min(45, Math.round(8 + pct * 0.37)),
+                })
+              } else {
+                setProcessing({
+                  status: 'processing',
+                  message: 'Detecting foreground objects…',
+                  percentage: Math.min(60, Math.round(45 + pct * 0.15)),
+                })
+              }
+            },
+          })
 
-        await new Promise((r) => setTimeout(r, 50)) // yield to browser
+          if (abortRef.current) return false
+
+          const fgUrl = URL.createObjectURL(fgBlob as Blob)
+          const fgImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const image = new Image()
+            image.onload = () => resolve(image)
+            image.onerror = reject
+            image.src = fgUrl
+          })
+          URL.revokeObjectURL(fgUrl)
+
+          const fgCanvas = document.createElement('canvas')
+          fgCanvas.width = width
+          fgCanvas.height = height
+          const fgCtx = fgCanvas.getContext('2d')!
+          fgCtx.drawImage(fgImg, 0, 0, width, height)
+          fgData = fgCtx.getImageData(0, 0, width, height).data
+        } catch (aiErr) {
+          console.warn('AI segmentation unavailable, falling back to edge mask:', aiErr)
+        }
 
         if (abortRef.current) return false
 
+        // Step 2: Separate foreground into individual object layers
         setProcessing({
           status: 'processing',
-          message: 'Clustering color regions…',
-          percentage: 55,
+          message: 'Separating objects…',
+          percentage: 68,
         })
 
-        const segments = clusterImageRegions(canvas, 5)
+        let objectLayers: LayerItem[] = []
+        const combinedMask = new Uint8Array(width * height)
 
-        if (abortRef.current) return false
+        if (fgData) {
+          for (let i = 0; i < width * height; i++) {
+            if (fgData[i * 4 + 3] > 28) {
+              combinedMask[i] = 1
+            }
+          }
+          objectLayers = extractForegroundObjects(fgData, origData, width, height)
+        }
 
+        // Step 3: Reconstruct (inpaint) background behind separated objects
         setProcessing({
           status: 'processing',
-          message: 'Building layers…',
+          message: 'Reconstructing background…',
           percentage: 80,
         })
+        await new Promise((r) => setTimeout(r, 20))
 
-        // Build layers from segments
-        // Add a full composite base layer first
-        const baseLayer = createFullImageLayer(canvas, 'Original Image')
+        const dilatedMask = dilateMask(combinedMask, width, height, 3)
+        const hasMaskPixels = dilatedMask.some((v) => v === 1)
+
+        const bgCanvas = document.createElement('canvas')
+        bgCanvas.width = width
+        bgCanvas.height = height
+        const bgCtx = bgCanvas.getContext('2d')!
+
+        if (hasMaskPixels && objectLayers.length > 0) {
+          const inpainted = inpaintBackground(origData, dilatedMask, width, height)
+          bgCtx.putImageData(inpainted, 0, 0)
+        } else {
+          bgCtx.drawImage(origCanvas, 0, 0)
+        }
+
+        // Step 4: Detect text via OCR (best-effort, skips cleanly if no text)
+        setProcessing({
+          status: 'processing',
+          message: 'Detecting text…',
+          percentage: 90,
+        })
+
+        const textLayers: LayerItem[] = []
+        try {
+          const { createWorker } = await import('tesseract.js')
+          const worker = await createWorker('eng', 1)
+          const { data } = await worker.recognize(imageUrl, {}, { blocks: true })
+          await worker.terminate()
+
+          const lines = (data.blocks ?? []).flatMap((b) =>
+            b.paragraphs.flatMap((p) => p.lines)
+          )
+
+          for (const line of lines) {
+            const cleanText = line.text.trim()
+            if (!cleanText || line.confidence < 60) continue
+            const { x0, y0, x1, y1 } = line.bbox
+            const boxW = Math.round(x1 - x0)
+            const boxH = Math.round(y1 - y0)
+            if (boxW < 12 || boxH < 10) continue
+
+            const fill = sampleTextColor(origData, width, height, x0, y0, x1, y1)
+
+            textLayers.push({
+              id: generateId('text'),
+              name: `Text: "${cleanText.slice(0, 18)}${cleanText.length > 18 ? '…' : ''}"`,
+              type: 'text',
+              visible: true,
+              locked: false,
+              opacity: 1,
+              x: Math.round(x0),
+              y: Math.round(y0),
+              width: Math.max(20, boxW),
+              height: Math.max(16, boxH),
+              rotation: 0,
+              text: cleanText,
+              fontSize: Math.max(12, Math.round(boxH * 0.78)),
+              fontFamily: 'Inter, sans-serif',
+              fontWeight: '600',
+              fill,
+              textAlign: 'left',
+              letterSpacing: 0,
+            })
+          }
+        } catch (ocrErr) {
+          console.warn('OCR step skipped:', ocrErr)
+        }
+
+        if (abortRef.current) return false
+
+        const backgroundLayer: LayerItem = {
+          id: generateId('bg'),
+          name: 'Background',
+          type: 'image',
+          visible: true,
+          locked: false,
+          opacity: 1,
+          x: 0,
+          y: 0,
+          width,
+          height,
+          rotation: 0,
+          imageData: bgCanvas.toDataURL('image/png'),
+        }
 
         const allLayers: LayerItem[] = [
-          // Full image as bottom layer
-          {
-            id: baseLayer.id,
-            name: baseLayer.name,
-            type: 'image',
-            visible: true,
-            locked: false,
-            opacity: 1,
-            x: 0,
-            y: 0,
-            width: canvas.width,
-            height: canvas.height,
-            rotation: 0,
-            imageData: baseLayer.imageDataUrl,
-          },
-          // Individual segments
-          ...segments.map((seg, i) => ({
-            id: seg.id,
-            name: seg.name,
-            type: 'image' as const,
-            visible: i === 0, // Show only first segment initially
-            locked: false,
-            opacity: 1,
-            x: seg.bbox.x,
-            y: seg.bbox.y,
-            width: seg.bbox.width,
-            height: seg.bbox.height,
-            rotation: 0,
-            imageData: seg.imageDataUrl,
-          })),
+          backgroundLayer,
+          ...objectLayers,
+          ...textLayers,
         ]
 
         pushHistory()
@@ -255,7 +645,9 @@ export function useSegmentation() {
 
         setProcessing({
           status: 'done',
-          message: `Detected ${segments.length} visual layers!`,
+          message: `Separated ${objectLayers.length} object${objectLayers.length !== 1 ? 's' : ''}${
+            textLayers.length > 0 ? ` and ${textLayers.length} text layer${textLayers.length !== 1 ? 's' : ''}` : ''
+          }`,
           percentage: 100,
         })
 

@@ -25,11 +25,11 @@ export default function DropZone({
     (file: File) => {
       setError(null)
       if (!ACCEPTED_TYPES.includes(file.type)) {
-        setError('Unsupported format. Please upload JPG, PNG, or WEBP.')
+        setError('Unsupported format. Use JPG, PNG, or WEBP.')
         return
       }
       if (file.size > maxSizeMB * 1024 * 1024) {
-        setError(`File too large. Maximum size is ${maxSizeMB}MB.`)
+        setError(`File exceeds ${maxSizeMB}MB limit.`)
         return
       }
       onFile(file)
@@ -60,7 +60,7 @@ export default function DropZone({
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]
       if (file) handleFile(file)
-      e.target.value = '' // Reset so same file can be re-uploaded
+      e.target.value = ''
     },
     [handleFile]
   )
@@ -71,49 +71,38 @@ export default function DropZone({
         htmlFor="dropzone-file-input"
         className={`
           relative flex flex-col items-center justify-center cursor-pointer
-          border-2 border-dashed rounded-2xl transition-all duration-300
-          ${compact ? 'p-6 gap-2' : 'p-12 gap-4'}
+          border border-dashed rounded-xl transition-colors
+          ${compact ? 'p-6 gap-2' : 'p-12 gap-3'}
           ${
             isDragging
-              ? 'border-purple-500 bg-purple-50 scale-[1.01] shadow-lg shadow-purple-100'
-              : 'border-zinc-300 bg-zinc-50 hover:border-purple-400 hover:bg-purple-50/50'
+              ? 'border-black bg-neutral-100'
+              : 'border-neutral-300 bg-neutral-50 hover:border-black hover:bg-neutral-100/60'
           }
         `}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
       >
-        {/* Upload icon with animation */}
         <div
           className={`
-            rounded-2xl flex items-center justify-center transition-all
-            ${isDragging ? 'bg-purple-100' : 'bg-white shadow-sm'}
-            ${compact ? 'w-12 h-12' : 'w-20 h-20'}
+            rounded-lg flex items-center justify-center border border-neutral-200 bg-white
+            ${compact ? 'w-10 h-10' : 'w-12 h-12'}
           `}
         >
           {isDragging ? (
-            <ImageIcon className={`text-purple-600 ${compact ? 'w-6 h-6' : 'w-10 h-10'}`} />
+            <ImageIcon className={`text-black ${compact ? 'w-5 h-5' : 'w-6 h-6'}`} />
           ) : (
-            <Upload className={`text-zinc-400 ${compact ? 'w-6 h-6' : 'w-10 h-10'}`} />
+            <Upload className={`text-neutral-700 ${compact ? 'w-5 h-5' : 'w-6 h-6'}`} />
           )}
         </div>
 
-        {/* Text */}
-        <div className={`text-center ${compact ? 'space-y-0.5' : 'space-y-2'}`}>
-          <p className={`font-semibold text-zinc-700 ${compact ? 'text-sm' : 'text-base'}`}>
-            {isDragging ? 'Drop it here!' : 'Drag and drop your image here'}
+        <div className="text-center space-y-1">
+          <p className={`font-medium text-black ${compact ? 'text-sm' : 'text-base'}`}>
+            {isDragging ? 'Drop image' : 'Drag and drop image'}
           </p>
-          <p className={`text-zinc-400 ${compact ? 'text-xs' : 'text-sm'}`}>
-            Or{' '}
-            <span className="text-purple-600 font-medium underline underline-offset-2">
-              browse files from your device
-            </span>
+          <p className="text-xs text-neutral-500">
+            or <span className="text-black underline underline-offset-2">browse</span> · JPG, PNG, WEBP
           </p>
-          {!compact && (
-            <p className="text-xs text-zinc-400 mt-1">
-              Supports JPG, JPEG, PNG, WEBP · Max {maxSizeMB}MB
-            </p>
-          )}
         </div>
 
         <input
@@ -126,7 +115,7 @@ export default function DropZone({
       </label>
 
       {error && (
-        <div className="mt-3 flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 animate-fade-in">
+        <div className="mt-3 flex items-center gap-2 text-xs text-black bg-neutral-100 border border-neutral-300 rounded-lg px-3 py-2">
           <AlertCircle className="w-4 h-4 shrink-0" />
           {error}
         </div>

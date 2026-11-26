@@ -13,30 +13,27 @@ export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false)
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-zinc-100 shadow-sm">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Logo */}
-          <Link to="/" className="flex items-center gap-2 group">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-600 to-sky-500 flex items-center justify-center shadow-lg group-hover:shadow-purple-300 transition-shadow">
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-neutral-200">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6">
+        <div className="flex items-center justify-between h-14">
+          <Link to="/" className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-md bg-black flex items-center justify-center">
               <Layers className="w-4 h-4 text-white" />
             </div>
-            <span className="font-bold text-xl tracking-tight">
-              <span className="gradient-text">Magic</span>
-              <span className="text-zinc-800"> Layer</span>
+            <span className="font-semibold text-base tracking-tight text-black">
+              Magic Layer
             </span>
           </Link>
 
-          {/* Desktop nav */}
           <div className="hidden md:flex items-center gap-1">
             {navLinks.map((link) => (
               <Link
                 key={link.to}
                 to={link.to}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                className={`px-3 py-1.5 rounded-md text-sm font-medium ${
                   location.pathname === link.to
-                    ? 'bg-purple-50 text-purple-700'
-                    : 'text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900'
+                    ? 'bg-neutral-100 text-black'
+                    : 'text-neutral-600 hover:text-black hover:bg-neutral-50'
                 }`}
               >
                 {link.label}
@@ -44,18 +41,16 @@ export default function Navbar() {
             ))}
           </div>
 
-          {/* CTA + Mobile toggle */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <Link
               to="/magic-layers"
-              className="hidden md:flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-purple-600 to-sky-500 hover:opacity-90 shadow-md hover:shadow-purple-200 transition-all"
+              className="hidden md:inline-flex items-center px-3.5 py-1.5 rounded-md text-sm font-medium text-white bg-black hover:bg-neutral-800"
             >
-              <Layers className="w-4 h-4" />
-              Start Editing Free
+              Open Editor
             </Link>
             <button
               onClick={() => setMobileOpen(!mobileOpen)}
-              className="md:hidden p-2 rounded-lg text-zinc-600 hover:bg-zinc-100"
+              className="md:hidden p-2 rounded-md text-neutral-600 hover:bg-neutral-100"
               aria-label="Toggle menu"
             >
               {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -64,18 +59,17 @@ export default function Navbar() {
         </div>
       </div>
 
-      {/* Mobile menu */}
       {mobileOpen && (
-        <div className="md:hidden border-t border-zinc-100 bg-white px-4 py-3 space-y-1 animate-fade-in">
+        <div className="md:hidden border-t border-neutral-200 bg-white px-4 py-3 space-y-1">
           {navLinks.map((link) => (
             <Link
               key={link.to}
               to={link.to}
               onClick={() => setMobileOpen(false)}
-              className={`block px-4 py-2 rounded-lg text-sm font-medium ${
+              className={`block px-3 py-2 rounded-md text-sm font-medium ${
                 location.pathname === link.to
-                  ? 'bg-purple-50 text-purple-700'
-                  : 'text-zinc-600 hover:bg-zinc-50'
+                  ? 'bg-neutral-100 text-black'
+                  : 'text-neutral-600 hover:bg-neutral-50'
               }`}
             >
               {link.label}
@@ -84,9 +78,9 @@ export default function Navbar() {
           <Link
             to="/magic-layers"
             onClick={() => setMobileOpen(false)}
-            className="block px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-purple-600 to-sky-500 mt-2"
+            className="block px-3 py-2 rounded-md text-sm font-medium text-white bg-black mt-2 text-center"
           >
-            Start Editing Free
+            Open Editor
           </Link>
         </div>
       )}

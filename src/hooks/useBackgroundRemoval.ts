@@ -23,8 +23,6 @@ export function useBackgroundRemoval() {
 
         const result = await removeBg(file, {
           model: 'isnet_quint8',
-          device: 'gpu',
-          publicPath: `https://staticimgly.com/@imgly/background-removal-data/1.5.8/dist/`,
           progress: (key: string, current: number, total: number) => {
             if (abortRef.current) return
             const pct = total > 0 ? Math.round((current / total) * 100) : 0

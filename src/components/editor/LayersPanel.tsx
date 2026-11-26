@@ -18,9 +18,9 @@ import type { LayerItem } from '../../types'
 
 function LayerTypeIcon({ type }: { type: LayerItem['type'] }) {
   switch (type) {
-    case 'text': return <Type className="w-3 h-3 text-violet-500" />
-    case 'shape': return <Square className="w-3 h-3 text-orange-500" />
-    default: return <Image className="w-3 h-3 text-sky-500" />
+    case 'text': return <Type className="w-3 h-3 text-neutral-700" />
+    case 'shape': return <Square className="w-3 h-3 text-neutral-700" />
+    default: return <Image className="w-3 h-3 text-neutral-700" />
   }
 }
 
@@ -86,22 +86,22 @@ function LayerRow({ layer, index, isSelected, totalLayers }: LayerRowProps) {
     <div
       className={`
         group flex items-center gap-2 px-3 py-2 cursor-pointer select-none
-        border-b border-zinc-100 transition-colors
-        ${isSelected ? 'bg-purple-50 border-l-2 border-l-purple-500' : 'hover:bg-zinc-50'}
+        border-b border-neutral-100 transition-colors
+        ${isSelected ? 'bg-neutral-100 border-l-2 border-l-black' : 'hover:bg-neutral-50'}
       `}
       onClick={() => setSelectedLayerId(isSelected ? null : layer.id)}
     >
       {/* Drag handle */}
-      <GripVertical className="w-3.5 h-3.5 text-zinc-300 shrink-0 cursor-grab" />
+      <GripVertical className="w-3.5 h-3.5 text-neutral-300 shrink-0 cursor-grab" />
 
       {/* Thumbnail */}
-      <div className="w-8 h-8 rounded border border-zinc-200 overflow-hidden shrink-0 bg-zinc-100 flex items-center justify-center">
+      <div className="w-8 h-8 rounded border border-neutral-200 overflow-hidden shrink-0 bg-neutral-100 flex items-center justify-center">
         {layer.type === 'image' && layer.imageData ? (
           <img src={layer.imageData} alt="" className="w-full h-full object-cover" />
         ) : layer.type === 'text' ? (
-          <Type className="w-4 h-4 text-violet-400" />
+          <Type className="w-4 h-4 text-neutral-500" />
         ) : (
-          <Square className="w-4 h-4 text-orange-400" />
+          <Square className="w-4 h-4 text-neutral-500" />
         )}
       </div>
 
@@ -109,28 +109,28 @@ function LayerRow({ layer, index, isSelected, totalLayers }: LayerRowProps) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <LayerTypeIcon type={layer.type} />
-          <span className={`text-xs font-medium truncate ${isSelected ? 'text-purple-700' : 'text-zinc-700'}`}>
+          <span className={`text-xs font-medium truncate ${isSelected ? 'text-black' : 'text-neutral-700'}`}>
             {layer.name}
           </span>
         </div>
         {layer.type === 'text' && (
-          <p className="text-xs text-zinc-400 truncate">{layer.text?.slice(0, 20)}</p>
+          <p className="text-xs text-neutral-400 truncate">{layer.text?.slice(0, 20)}</p>
         )}
       </div>
 
       {/* Controls */}
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button onClick={moveUp} className="p-1 rounded hover:bg-zinc-200" title="Move up">
-          <ChevronUp className="w-3 h-3 text-zinc-500" />
+        <button onClick={moveUp} className="p-1 rounded hover:bg-neutral-200" title="Move up">
+          <ChevronUp className="w-3 h-3 text-neutral-600" />
         </button>
-        <button onClick={moveDown} className="p-1 rounded hover:bg-zinc-200" title="Move down">
-          <ChevronDown className="w-3 h-3 text-zinc-500" />
+        <button onClick={moveDown} className="p-1 rounded hover:bg-neutral-200" title="Move down">
+          <ChevronDown className="w-3 h-3 text-neutral-600" />
         </button>
-        <button onClick={handleDuplicate} className="p-1 rounded hover:bg-zinc-200" title="Duplicate">
-          <Copy className="w-3 h-3 text-zinc-500" />
+        <button onClick={handleDuplicate} className="p-1 rounded hover:bg-neutral-200" title="Duplicate">
+          <Copy className="w-3 h-3 text-neutral-600" />
         </button>
-        <button onClick={handleDelete} className="p-1 rounded hover:bg-red-100" title="Delete">
-          <Trash2 className="w-3 h-3 text-red-400" />
+        <button onClick={handleDelete} className="p-1 rounded hover:bg-neutral-200" title="Delete">
+          <Trash2 className="w-3 h-3 text-neutral-600" />
         </button>
       </div>
 
@@ -138,14 +138,14 @@ function LayerRow({ layer, index, isSelected, totalLayers }: LayerRowProps) {
       <div className="flex items-center gap-0.5 ml-1">
         <button
           onClick={handleVisibility}
-          className={`p-1 rounded transition-colors ${layer.visible ? 'text-zinc-400 hover:text-zinc-600' : 'text-zinc-200 hover:text-zinc-400'}`}
+          className={`p-1 rounded transition-colors ${layer.visible ? 'text-neutral-500 hover:text-black' : 'text-neutral-300 hover:text-neutral-500'}`}
           title={layer.visible ? 'Hide layer' : 'Show layer'}
         >
           {layer.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
         </button>
         <button
           onClick={handleLock}
-          className={`p-1 rounded transition-colors ${layer.locked ? 'text-purple-500' : 'text-zinc-200 hover:text-zinc-400'}`}
+          className={`p-1 rounded transition-colors ${layer.locked ? 'text-black' : 'text-neutral-300 hover:text-neutral-500'}`}
           title={layer.locked ? 'Unlock layer' : 'Lock layer'}
         >
           {layer.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
@@ -193,7 +193,7 @@ export default function LayersPanel() {
         </h2>
         <button
           onClick={handleAddText}
-          className="text-xs text-purple-600 font-medium hover:text-purple-700 transition-colors"
+          className="text-xs text-black font-medium hover:underline"
         >
           + Text
         </button>
