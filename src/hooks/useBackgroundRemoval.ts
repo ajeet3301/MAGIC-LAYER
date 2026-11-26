@@ -12,7 +12,7 @@ export function useBackgroundRemoval() {
       try {
         setProcessing({
           status: 'loading-model',
-          message: 'Loading AI model… (downloads once, then cached)',
+          message: 'Magic starting…',
           percentage: 0,
         })
 
@@ -30,13 +30,13 @@ export function useBackgroundRemoval() {
             if (key.includes('fetch') || key.includes('download')) {
               setProcessing({
                 status: 'loading-model',
-                message: `Downloading AI model: ${key.split(':').pop()?.trim() ?? ''}`,
+                message: 'Magic start…',
                 percentage: pct,
               })
             } else {
               setProcessing({
                 status: 'processing',
-                message: 'Removing background…',
+                message: 'Magic doing…',
                 percentage: Math.min(50 + Math.round(pct / 2), 99),
               })
             }

@@ -10,7 +10,7 @@ export function useOCR() {
       try {
         setProcessing({
           status: 'loading-model',
-          message: 'Loading OCR engine…',
+          message: 'Magic starting…',
           percentage: 5,
         })
 
@@ -29,13 +29,13 @@ export function useOCR() {
             if (m.status === 'recognizing text') {
               setProcessing({
                 status: 'processing',
-                message: 'Recognizing text…',
+                message: 'Magic doing…',
                 percentage: Math.round(10 + m.progress * 85),
               })
             } else if (m.status.includes('loading')) {
               setProcessing({
                 status: 'loading-model',
-                message: `Loading OCR: ${m.status}`,
+                message: 'Magic start…',
                 percentage: Math.round(m.progress * 10),
               })
             }

@@ -622,7 +622,7 @@ export function useSegmentation() {
       try {
         setProcessing({
           status: 'loading-model',
-          message: 'Loading AI segmentation model…',
+          message: 'Magic starting…',
           percentage: 8,
         })
 
@@ -663,13 +663,13 @@ export function useSegmentation() {
               if (key.includes('fetch') || key.includes('download')) {
                 setProcessing({
                   status: 'loading-model',
-                  message: 'Downloading AI model…',
+                  message: 'Magic start…',
                   percentage: Math.min(40, Math.round(8 + pct * 0.32)),
                 })
               } else {
                 setProcessing({
                   status: 'processing',
-                  message: 'Detecting foreground subjects…',
+                  message: 'Magic happening…',
                   percentage: Math.min(55, Math.round(40 + pct * 0.15)),
                 })
               }
@@ -702,7 +702,7 @@ export function useSegmentation() {
         // Step 2: Separate salient foreground objects
         setProcessing({
           status: 'processing',
-          message: 'Separating objects…',
+          message: 'Magic doing…',
           percentage: 62,
         })
 
@@ -721,7 +721,7 @@ export function useSegmentation() {
         // Step 3: Residual graphic/shape element extraction
         setProcessing({
           status: 'processing',
-          message: 'Detecting graphic elements…',
+          message: 'Magic happening…',
           percentage: 72,
         })
         const residual = extractResidualElements(origData, combinedMask, width, height)
@@ -731,7 +731,7 @@ export function useSegmentation() {
         // Step 4: OCR Text Extraction + Text Ink Masking
         setProcessing({
           status: 'processing',
-          message: 'Extracting text layers…',
+          message: 'Magic doing…',
           percentage: 82,
         })
 
@@ -795,7 +795,7 @@ export function useSegmentation() {
         // Step 5: Reconstruct Background behind all objects, elements, and text
         setProcessing({
           status: 'processing',
-          message: 'Reconstructing background…',
+          message: 'Magic happening…',
           percentage: 92,
         })
         await new Promise((r) => setTimeout(r, 20))
