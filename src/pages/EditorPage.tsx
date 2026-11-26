@@ -22,8 +22,9 @@ import PropertiesPanel from '../components/editor/PropertiesPanel'
 import ProcessingOverlay from '../components/upload/ProcessingOverlay'
 import { useEditorStore } from '../store/editorStore'
 import { useOCR } from '../hooks/useOCR'
+import { exportLayersToPsd } from '../utils/exportPsd'
 
-type ExportFormat = 'png' | 'jpg' | 'zip'
+type ExportFormat = 'png' | 'jpg' | 'psd' | 'zip'
 
 function ToolbarButton({
   onClick,
@@ -131,6 +132,20 @@ export default function EditorPage() {
     async (format: ExportFormat) => {
       setShowExportMenu(false)
 
+      if (format === 'psd') {
+        setProcessing({ status: 'processing', message: 'Building layered PSD…', percentage: 50 })
+        const psdBlob = await exportLayersToPsd(layers, canvasWidth, canvasHeight)
+        const url = URL.createObjectURL(psdBlob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `magic-layer-${Date.now()}.psd`
+        a.click()
+        URL.revokeObjectURL(url)
+        setProcessing({ status: 'done', message: 'PSD downloaded!', percentage: 100 })
+        setTimeout(() => setProcessing({ status: 'idle', message: '', percentage: 0 }), 2000)
+        return
+      }
+
       if (format === 'zip') {
         setProcessing({ status: 'processing', message: 'Creating ZIP…', percentage: 10 })
         const zip = new JSZip()
@@ -183,7 +198,7 @@ export default function EditorPage() {
       setProcessing({ status: 'done', message: 'Image downloaded!', percentage: 100 })
       setTimeout(() => setProcessing({ status: 'idle', message: '', percentage: 0 }), 2000)
     },
-    [layers, setProcessing, stageRef]
+    [layers, canvasWidth, canvasHeight, setProcessing, stageRef]
   )
 
   const handleOCR = useCallback(async () => {
@@ -283,8 +298,8 @@ export default function EditorPage() {
             Export
           </button>
           {showExportMenu && (
-            <div className="absolute right-0 top-full mt-1 bg-white border border-neutral-200 rounded-lg shadow-lg z-50 overflow-hidden min-w-40">
-              {(['png', 'jpg', 'zip'] as ExportFormat[]).map((fmt) => (
+            <div className="absolute right-0 top-full mt-1 bg-white border border-neutral-200 rounded-lg shadow-lg z-50 overflow-hidden min-w-44">
+              {(['png', 'jpg', 'psd', 'zip'] as ExportFormat[]).map((fmt) => (
                 <button
                   key={fmt}
                   onClick={() => handleExport(fmt)}
@@ -293,6 +308,7 @@ export default function EditorPage() {
                   {fmt === 'zip' ? <Archive className="w-3.5 h-3.5" /> : <Download className="w-3.5 h-3.5" />}
                   {fmt === 'png' && 'Download PNG'}
                   {fmt === 'jpg' && 'Download JPG'}
+                  {fmt === 'psd' && 'Download PSD (.psd)'}
                   {fmt === 'zip' && 'Download All (ZIP)'}
                 </button>
               ))}

@@ -12,6 +12,7 @@
   "dependencies": {
     "@huggingface/transformers": "^4.3.2",
     "@imgly/background-removal": "^1.7.0",
+    "ag-psd": "^34.2.3",
     "jszip": "^3.10.2",
     "konva": "^10.11.0",
     "lucide-react": "^1.80.0",
