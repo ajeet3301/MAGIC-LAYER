@@ -1,17 +1,14 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
-import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Rect, Transformer } from 'react-konva'
+import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Rect, Circle, Transformer } from 'react-konva'
 import useImage from 'use-image'
 import { useEditorStore } from '../../store/editorStore'
 import type { LayerItem } from '../../types'
 
-// Individual image layer element
 function ImageElement({
   layer,
-  isSelected,
   onSelect,
 }: {
   layer: LayerItem
-  isSelected: boolean
   onSelect: () => void
 }) {
   const [image] = useImage(layer.imageData ?? '', 'anonymous')
@@ -55,15 +52,16 @@ function ImageElement({
   )
 }
 
-// Individual text layer element
 function TextElement({
   layer,
-  isSelected,
+  isEditing,
   onSelect,
+  onStartEdit,
 }: {
   layer: LayerItem
-  isSelected: boolean
+  isEditing: boolean
   onSelect: () => void
+  onStartEdit: () => void
 }) {
   const shapeRef = useRef<any>(null)
   const { updateLayer } = useEditorStore()
@@ -83,11 +81,17 @@ function TextElement({
       align={layer.textAlign ?? 'left'}
       letterSpacing={layer.letterSpacing ?? 0}
       rotation={layer.rotation}
-      opacity={layer.opacity}
+      opacity={isEditing ? 0 : layer.opacity}
       visible={layer.visible}
-      draggable={!layer.locked}
+      draggable={!layer.locked && !isEditing}
       onClick={onSelect}
       onTap={onSelect}
+      onDblClick={() => {
+        if (!layer.locked) onStartEdit()
+      }}
+      onDblTap={() => {
+        if (!layer.locked) onStartEdit()
+      }}
       onDragEnd={(e) => {
         updateLayer(layer.id, { x: e.target.x(), y: e.target.y() })
       }}
@@ -95,6 +99,7 @@ function TextElement({
         const node = shapeRef.current
         if (!node) return
         const scaleX = node.scaleX()
+        const scaleY = node.scaleY()
         node.scaleX(1)
         node.scaleY(1)
         updateLayer(layer.id, {
@@ -102,9 +107,91 @@ function TextElement({
           y: node.y(),
           rotation: node.rotation(),
           width: Math.max(20, node.width() * scaleX),
-          fontSize: Math.max(6, (layer.fontSize ?? 16) * node.scaleY()),
+          fontSize: Math.max(6, (layer.fontSize ?? 16) * scaleY),
         })
       }}
+    />
+  )
+}
+
+function ShapeElement({
+  layer,
+  onSelect,
+}: {
+  layer: LayerItem
+  onSelect: () => void
+}) {
+  const shapeRef = useRef<any>(null)
+  const { updateLayer } = useEditorStore()
+
+  const commonProps = {
+    ref: shapeRef,
+    id: layer.id,
+    x: layer.shapeType === 'circle' ? layer.x + layer.width / 2 : layer.x,
+    y: layer.shapeType === 'circle' ? layer.y + layer.height / 2 : layer.y,
+    fill: layer.shapeFill ?? '#000000',
+    stroke: layer.shapeStroke ?? undefined,
+    strokeWidth: layer.shapeStroke ? 2 : 0,
+    rotation: layer.rotation,
+    opacity: layer.opacity,
+    visible: layer.visible,
+    draggable: !layer.locked,
+    onClick: onSelect,
+    onTap: onSelect,
+    onDragEnd: (e: any) => {
+      if (layer.shapeType === 'circle') {
+        updateLayer(layer.id, {
+          x: e.target.x() - layer.width / 2,
+          y: e.target.y() - layer.height / 2,
+        })
+      } else {
+        updateLayer(layer.id, { x: e.target.x(), y: e.target.y() })
+      }
+    },
+    onTransformEnd: () => {
+      const node = shapeRef.current
+      if (!node) return
+      const scaleX = node.scaleX()
+      const scaleY = node.scaleY()
+      node.scaleX(1)
+      node.scaleY(1)
+      if (layer.shapeType === 'circle') {
+        const newW = Math.max(4, node.radiusX() * 2 * scaleX)
+        const newH = Math.max(4, node.radiusY() * 2 * scaleY)
+        updateLayer(layer.id, {
+          x: node.x() - newW / 2,
+          y: node.y() - newH / 2,
+          rotation: node.rotation(),
+          width: newW,
+          height: newH,
+        })
+      } else {
+        updateLayer(layer.id, {
+          x: node.x(),
+          y: node.y(),
+          rotation: node.rotation(),
+          width: Math.max(4, node.width() * scaleX),
+          height: Math.max(4, node.height() * scaleY),
+        })
+      }
+    },
+  }
+
+  if (layer.shapeType === 'circle') {
+    return (
+      <Circle
+        {...commonProps}
+        radius={Math.max(2, Math.min(layer.width, layer.height) / 2)}
+      />
+    )
+  }
+
+  return (
+    <Rect
+      {...commonProps}
+      width={layer.width}
+      height={layer.height}
+      cornerRadius={4}
     />
   )
 }
@@ -113,6 +200,7 @@ interface CanvasEditorProps {
   containerWidth: number
   containerHeight: number
   stageRef?: React.RefObject<any>
+  zoomMultiplier?: number
   magicSelectMode?: boolean
   onMagicPointClick?: (x: number, y: number) => void
 }
@@ -121,29 +209,32 @@ export default function CanvasEditor({
   containerWidth,
   containerHeight,
   stageRef: externalStageRef,
+  zoomMultiplier = 1,
   magicSelectMode = false,
   onMagicPointClick,
 }: CanvasEditorProps) {
-  const { layers, selectedLayerId, setSelectedLayerId, canvasWidth, canvasHeight } =
+  const { layers, selectedLayerId, setSelectedLayerId, updateLayer, canvasWidth, canvasHeight } =
     useEditorStore()
 
   const internalStageRef = useRef<any>(null)
   const stageRef = externalStageRef ?? internalStageRef
   const trRef = useRef<any>(null)
-  const [scale, setScale] = useState(1)
+  const [fitScale, setFitScale] = useState(1)
+  const [editingTextId, setEditingTextId] = useState<string | null>(null)
+  const [editingTextValue, setEditingTextValue] = useState('')
 
-  // Compute scale to fit canvas in container
   useEffect(() => {
     if (!containerWidth || !containerHeight) return
-    const scaleX = (containerWidth - 40) / canvasWidth
-    const scaleY = (containerHeight - 40) / canvasHeight
-    setScale(Math.min(scaleX, scaleY, 1))
+    const scaleX = (containerWidth - 48) / canvasWidth
+    const scaleY = (containerHeight - 48) / canvasHeight
+    setFitScale(Math.min(scaleX, scaleY, 1))
   }, [containerWidth, containerHeight, canvasWidth, canvasHeight])
 
-  // Bind transformer to selected node
+  const scale = fitScale * zoomMultiplier
+
   useEffect(() => {
     if (!trRef.current || !stageRef.current) return
-    if (selectedLayerId) {
+    if (selectedLayerId && !editingTextId && !magicSelectMode) {
       const node = stageRef.current.findOne(`#${selectedLayerId}`)
       if (node) {
         trRef.current.nodes([node])
@@ -153,7 +244,7 @@ export default function CanvasEditor({
     }
     trRef.current.nodes([])
     trRef.current.getLayer()?.batchDraw()
-  }, [selectedLayerId, layers])
+  }, [selectedLayerId, layers, editingTextId, magicSelectMode, stageRef])
 
   const handleStageClick = useCallback(
     (e: any) => {
@@ -165,7 +256,7 @@ export default function CanvasEditor({
         }
         return
       }
-      if (e.target === e.target.getStage() || e.target.getClassName() === 'Rect') {
+      if (e.target === e.target.getStage() || e.target.getAttr('data-bg') === true) {
         setSelectedLayerId(null)
       }
     },
@@ -173,18 +264,26 @@ export default function CanvasEditor({
   )
 
   const selectedLayer = layers.find((l) => l.id === selectedLayerId)
+  const editingLayer = layers.find((l) => l.id === editingTextId)
   const isLocked = selectedLayer?.locked ?? false
 
   const scaledWidth = canvasWidth * scale
   const scaledHeight = canvasHeight * scale
 
+  const commitTextEdit = () => {
+    if (editingTextId) {
+      updateLayer(editingTextId, { text: editingTextValue })
+      setEditingTextId(null)
+    }
+  }
+
   return (
     <div
-      className="flex items-center justify-center w-full h-full overflow-auto"
-      style={{ background: 'repeating-conic-gradient(#e4e4e7 0% 25%, #f4f4f5 0% 50%) 0 0 / 20px 20px' }}
+      className="flex items-center justify-center w-full h-full overflow-auto p-6"
+      style={{ background: 'repeating-conic-gradient(#e5e5e5 0% 25%, #f5f5f5 0% 50%) 0 0 / 20px 20px' }}
     >
       <div
-        className="relative shadow-2xl"
+        className="relative shadow-2xl shrink-0"
         style={{
           width: scaledWidth,
           height: scaledHeight,
@@ -201,7 +300,6 @@ export default function CanvasEditor({
           onTap={handleStageClick}
         >
           <Layer>
-            {/* White background base */}
             <Rect
               x={0}
               y={0}
@@ -209,21 +307,23 @@ export default function CanvasEditor({
               height={canvasHeight}
               fill="white"
               listening={true}
-              onClick={() => setSelectedLayerId(null)}
+              data-bg={true}
+              onClick={handleStageClick}
             />
 
-            {/* Render layers from bottom to top */}
             {layers.map((layer) => {
               if (!layer.visible) return null
-              const sel = layer.id === selectedLayerId
+              const onSelect = () => {
+                if (magicSelectMode) return
+                setSelectedLayerId(layer.id)
+              }
 
               if (layer.type === 'image') {
                 return (
                   <ImageElement
                     key={layer.id}
                     layer={layer}
-                    isSelected={sel}
-                    onSelect={() => setSelectedLayerId(sel ? null : layer.id)}
+                    onSelect={onSelect}
                   />
                 )
               }
@@ -232,15 +332,27 @@ export default function CanvasEditor({
                   <TextElement
                     key={layer.id}
                     layer={layer}
-                    isSelected={sel}
-                    onSelect={() => setSelectedLayerId(sel ? null : layer.id)}
+                    isEditing={editingTextId === layer.id}
+                    onSelect={onSelect}
+                    onStartEdit={() => {
+                      setEditingTextId(layer.id)
+                      setEditingTextValue(layer.text ?? '')
+                    }}
+                  />
+                )
+              }
+              if (layer.type === 'shape') {
+                return (
+                  <ShapeElement
+                    key={layer.id}
+                    layer={layer}
+                    onSelect={onSelect}
                   />
                 )
               }
               return null
             })}
 
-            {/* Transformer for selection */}
             <Transformer
               ref={trRef}
               rotateEnabled={!isLocked}
@@ -262,30 +374,45 @@ export default function CanvasEditor({
             />
           </Layer>
         </Stage>
+
+        {/* Inline text editor overlay (Canva-style double-click editing) */}
+        {editingLayer && (
+          <textarea
+            autoFocus
+            value={editingTextValue}
+            onChange={(e) => setEditingTextValue(e.target.value)}
+            onBlur={commitTextEdit}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setEditingTextId(null)
+              } else if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                commitTextEdit()
+              }
+            }}
+            style={{
+              position: 'absolute',
+              left: editingLayer.x * scale,
+              top: editingLayer.y * scale,
+              width: Math.max(60, editingLayer.width * scale),
+              minHeight: Math.max(24, (editingLayer.fontSize ?? 16) * scale * 1.4),
+              fontSize: (editingLayer.fontSize ?? 16) * scale,
+              fontFamily: editingLayer.fontFamily ?? 'Inter, sans-serif',
+              fontWeight: editingLayer.fontWeight === 'bold' ? 'bold' : 'normal',
+              color: editingLayer.fill ?? '#000000',
+              textAlign: editingLayer.textAlign ?? 'left',
+              lineHeight: 1.2,
+              background: 'rgba(255,255,255,0.85)',
+              border: '1px solid #000000',
+              outline: 'none',
+              padding: '2px 4px',
+              resize: 'none',
+              overflow: 'hidden',
+              zIndex: 30,
+            }}
+          />
+        )}
       </div>
     </div>
   )
-}
-
-// Export function for use by EditorPage
-export function exportStageToBlob(
-  stageRef: React.RefObject<any>,
-  format: 'png' | 'jpg',
-  pixelRatio = 2
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    if (!stageRef.current) {
-      reject(new Error('Stage not initialized'))
-      return
-    }
-    const dataUrl = stageRef.current.toDataURL({
-      mimeType: format === 'jpg' ? 'image/jpeg' : 'image/png',
-      pixelRatio,
-      quality: 1,
-    })
-    fetch(dataUrl)
-      .then((r) => r.blob())
-      .then(resolve)
-      .catch(reject)
-  })
 }

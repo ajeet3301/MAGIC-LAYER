@@ -50,6 +50,15 @@ async function layerToCanvas(layer: LayerItem): Promise<HTMLCanvasElement> {
     lines.forEach((line, idx) => {
       ctx.fillText(line, drawX, idx * lineHeight, w)
     })
+  } else if (layer.type === 'shape') {
+    ctx.fillStyle = layer.shapeFill ?? '#000000'
+    if (layer.shapeType === 'circle') {
+      ctx.beginPath()
+      ctx.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2)
+      ctx.fill()
+    } else {
+      ctx.fillRect(0, 0, w, h)
+    }
   }
 
   return canvas

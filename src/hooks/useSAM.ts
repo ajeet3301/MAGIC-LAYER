@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react'
 import { useEditorStore } from '../store/editorStore'
-import { dilateMask, inpaintBackground } from '../utils/inpaint'
+import { decontaminateEdges, dilateMask, inpaintBackground } from '../utils/inpaint'
 import type { LayerItem } from '../types'
 
 const SAM_MODEL_ID = 'Xenova/slimsam-77-uniform'
@@ -9,7 +9,7 @@ let cachedModel: any = null
 let cachedProcessor: any = null
 
 export function useSAM() {
-  const { layers, canvasWidth, canvasHeight, addLayer, updateLayer, setProcessing, pushHistory } =
+  const { layers, addLayer, updateLayer, setSelectedLayerId, setProcessing, pushHistory } =
     useEditorStore()
 
   const cachedImageSrcRef = useRef<string | null>(null)
@@ -68,11 +68,13 @@ export function useSAM() {
           percentage: 75,
         })
 
-        // Map canvas coordinates to background layer local coordinates
-        const localX = Math.max(0, Math.min(bgLayer.width, clickX - bgLayer.x))
-        const localY = Math.max(0, Math.min(bgLayer.height, clickY - bgLayer.y))
-
+        // Map canvas coordinates to raw image pixel coordinates
         const rawImg = await RawImage.fromURL(bgLayer.imageData)
+        const scaleToRawX = rawImg.width / Math.max(1, bgLayer.width)
+        const scaleToRawY = rawImg.height / Math.max(1, bgLayer.height)
+        const localX = Math.max(0, Math.min(rawImg.width - 1, (clickX - bgLayer.x) * scaleToRawX))
+        const localY = Math.max(0, Math.min(rawImg.height - 1, (clickY - bgLayer.y) * scaleToRawY))
+
         const promptInputs = await cachedProcessor(rawImg, {
           input_points: [[[localX, localY]]],
           input_labels: [[1]],
@@ -173,7 +175,7 @@ export function useSAM() {
             }
           }
         }
-        objCtx.putImageData(objImg, 0, 0)
+        objCtx.putImageData(decontaminateEdges(objImg), 0, 0)
 
         // Inpaint the extracted object out of the background layer
         const dilated = dilateMask(binaryMask, w, h, 3)
@@ -206,6 +208,7 @@ export function useSAM() {
         }
 
         addLayer(newLayer)
+        setSelectedLayerId(newLayer.id)
         setProcessing({ status: 'idle', message: '', percentage: 0 })
         return true
       } catch (err) {
@@ -218,7 +221,7 @@ export function useSAM() {
         return false
       }
     },
-    [layers, canvasWidth, canvasHeight, addLayer, updateLayer, setProcessing, pushHistory]
+    [layers, addLayer, updateLayer, setSelectedLayerId, setProcessing, pushHistory]
   )
 
   return { extractAtPoint }

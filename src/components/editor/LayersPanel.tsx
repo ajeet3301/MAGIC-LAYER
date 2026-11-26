@@ -156,47 +156,118 @@ function LayerRow({ layer, index, isSelected, totalLayers }: LayerRowProps) {
 }
 
 export default function LayersPanel() {
-  const { layers, selectedLayerId, addLayer, canvasWidth, canvasHeight } = useEditorStore()
+  const { layers, selectedLayerId, addLayer, setSelectedLayerId, canvasWidth, canvasHeight } = useEditorStore()
 
   const handleAddText = () => {
+    const id = `text-${Date.now()}`
     addLayer({
-      id: `text-${Date.now()}`,
-      name: 'New Text',
+      id,
+      name: 'Text',
       type: 'text',
       visible: true,
       locked: false,
       opacity: 1,
-      x: canvasWidth / 2 - 100,
-      y: canvasHeight / 2 - 20,
+      x: Math.max(0, canvasWidth / 2 - 100),
+      y: Math.max(0, canvasHeight / 2 - 20),
       width: 200,
       height: 40,
       rotation: 0,
       text: 'Double-click to edit',
-      fontSize: 24,
+      fontSize: 28,
       fontFamily: 'Inter, sans-serif',
       fontWeight: '600',
-      fill: '#18181b',
+      fill: '#000000',
       textAlign: 'left',
       letterSpacing: 0,
     })
+    setSelectedLayerId(id)
+  }
+
+  const handleAddShape = () => {
+    const id = `shape-${Date.now()}`
+    addLayer({
+      id,
+      name: 'Shape',
+      type: 'shape',
+      shapeType: 'rect',
+      shapeFill: '#000000',
+      visible: true,
+      locked: false,
+      opacity: 1,
+      x: Math.max(0, canvasWidth / 2 - 60),
+      y: Math.max(0, canvasHeight / 2 - 60),
+      width: 120,
+      height: 120,
+      rotation: 0,
+    })
+    setSelectedLayerId(id)
+  }
+
+  const handleAddImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const url = URL.createObjectURL(file)
+    const img = new window.Image()
+    img.onload = () => {
+      const maxW = canvasWidth * 0.6
+      const maxH = canvasHeight * 0.6
+      const ratio = Math.min(1, maxW / img.naturalWidth, maxH / img.naturalHeight)
+      const w = Math.round(img.naturalWidth * ratio)
+      const h = Math.round(img.naturalHeight * ratio)
+      const id = `img-${Date.now()}`
+      addLayer({
+        id,
+        name: file.name.replace(/\.[^/.]+$/, '').slice(0, 20) || 'Image',
+        type: 'image',
+        visible: true,
+        locked: false,
+        opacity: 1,
+        x: Math.round((canvasWidth - w) / 2),
+        y: Math.round((canvasHeight - h) / 2),
+        width: w,
+        height: h,
+        rotation: 0,
+        imageData: url,
+      })
+      setSelectedLayerId(id)
+    }
+    img.src = url
+    e.target.value = ''
   }
 
   // Layers displayed in reverse order (top layer first visually)
   const reversedLayers = [...layers].reverse()
 
   return (
-    <div className="flex flex-col h-full bg-white border-r border-zinc-200">
+    <div className="flex flex-col h-full bg-white border-r border-neutral-200">
       {/* Panel header */}
-      <div className="flex items-center justify-between px-3 py-3 border-b border-zinc-100">
-        <h2 className="text-xs font-bold text-zinc-700 uppercase tracking-wider">
+      <div className="flex items-center justify-between px-3 py-3 border-b border-neutral-100">
+        <h2 className="text-xs font-bold text-neutral-800 uppercase tracking-wider">
           Layers ({layers.length})
         </h2>
-        <button
-          onClick={handleAddText}
-          className="text-xs text-black font-medium hover:underline"
-        >
-          + Text
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleAddText}
+            className="text-xs text-black font-medium hover:underline"
+          >
+            + Text
+          </button>
+          <button
+            onClick={handleAddShape}
+            className="text-xs text-black font-medium hover:underline"
+          >
+            + Shape
+          </button>
+          <label className="text-xs text-black font-medium hover:underline cursor-pointer">
+            + Img
+            <input
+              type="file"
+              accept="image/jpeg,image/jpg,image/png,image/webp"
+              onChange={handleAddImage}
+              className="sr-only"
+            />
+          </label>
+        </div>
       </div>
 
       {/* Layer list */}

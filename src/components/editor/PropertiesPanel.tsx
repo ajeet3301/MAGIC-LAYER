@@ -49,7 +49,7 @@ function NumberInput({
 }
 
 export default function PropertiesPanel() {
-  const { layers, selectedLayerId, updateLayer } = useEditorStore()
+  const { layers, selectedLayerId, updateLayer, canvasWidth, canvasHeight } = useEditorStore()
 
   const selectedLayer = layers.find((l) => l.id === selectedLayerId)
 
@@ -104,14 +104,63 @@ export default function PropertiesPanel() {
             unit="°"
           />
 
-          <NumberInput
-            label="Opacity"
-            value={selectedLayer.opacity * 100}
-            onChange={(v) => update({ opacity: Math.max(0, Math.min(1, v / 100)) })}
-            min={0}
-            max={100}
-            unit="%"
-          />
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-neutral-500 font-medium">Opacity</label>
+              <span className="text-xs text-neutral-700 font-medium">{Math.round(selectedLayer.opacity * 100)}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(selectedLayer.opacity * 100)}
+              onChange={(e) => update({ opacity: Number(e.target.value) / 100 })}
+              className="w-full accent-black cursor-pointer"
+            />
+          </div>
+
+          {/* Align to Canvas */}
+          <div className="pt-1">
+            <label className="text-xs text-neutral-500 font-medium block mb-1.5">Align to Canvas</label>
+            <div className="grid grid-cols-3 gap-1">
+              <button
+                onClick={() => update({ x: 0 })}
+                className="px-2 py-1 text-xs border border-neutral-200 rounded hover:border-black"
+              >
+                Left
+              </button>
+              <button
+                onClick={() => update({ x: Math.round((canvasWidth - selectedLayer.width) / 2) })}
+                className="px-2 py-1 text-xs border border-neutral-200 rounded hover:border-black"
+              >
+                Center
+              </button>
+              <button
+                onClick={() => update({ x: Math.round(canvasWidth - selectedLayer.width) })}
+                className="px-2 py-1 text-xs border border-neutral-200 rounded hover:border-black"
+              >
+                Right
+              </button>
+              <button
+                onClick={() => update({ y: 0 })}
+                className="px-2 py-1 text-xs border border-neutral-200 rounded hover:border-black"
+              >
+                Top
+              </button>
+              <button
+                onClick={() => update({ y: Math.round((canvasHeight - selectedLayer.height) / 2) })}
+                className="px-2 py-1 text-xs border border-neutral-200 rounded hover:border-black"
+              >
+                Middle
+              </button>
+              <button
+                onClick={() => update({ y: Math.round(canvasHeight - selectedLayer.height) })}
+                className="px-2 py-1 text-xs border border-neutral-200 rounded hover:border-black"
+              >
+                Bottom
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* State section */}
@@ -229,6 +278,40 @@ export default function PropertiesPanel() {
               onChange={(v) => update({ letterSpacing: v })}
               unit="px"
             />
+          </div>
+        )}
+
+        {/* Shape properties */}
+        {selectedLayer.type === 'shape' && (
+          <div className="px-3 py-4 border-b border-neutral-100 space-y-3">
+            <h3 className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">Shape</h3>
+            <div className="flex items-center gap-1">
+              {(['rect', 'circle'] as const).map((st) => (
+                <button
+                  key={st}
+                  onClick={() => update({ shapeType: st })}
+                  className={`flex-1 py-1.5 text-xs rounded-md border capitalize ${
+                    (selectedLayer.shapeType ?? 'rect') === st
+                      ? 'bg-black text-white border-black'
+                      : 'bg-neutral-50 text-neutral-700 border-neutral-200 hover:border-black'
+                  }`}
+                >
+                  {st}
+                </button>
+              ))}
+            </div>
+            <div>
+              <label className="text-xs text-neutral-400 font-medium block mb-1">Fill Color</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={selectedLayer.shapeFill ?? '#000000'}
+                  onChange={(e) => update({ shapeFill: e.target.value })}
+                  className="w-8 h-8 rounded-lg border border-neutral-200 cursor-pointer p-0.5"
+                />
+                <span className="text-xs text-neutral-500 font-mono">{selectedLayer.shapeFill ?? '#000000'}</span>
+              </div>
+            </div>
           </div>
         )}
 

@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react'
 import { useEditorStore } from '../store/editorStore'
-import { dilateMask, inpaintBackground } from '../utils/inpaint'
+import { decontaminateEdges, dilateMask, inpaintBackground } from '../utils/inpaint'
 import type { LayerItem } from '../types'
 
 function generateId(prefix = 'layer') {
@@ -142,7 +142,7 @@ function extractForegroundObjects(
     }
 
     if (!hasVisiblePixels) continue
-    cropCtx.putImageData(cropImg, 0, 0)
+    cropCtx.putImageData(decontaminateEdges(cropImg), 0, 0)
 
     layers.push({
       id: generateId('obj'),

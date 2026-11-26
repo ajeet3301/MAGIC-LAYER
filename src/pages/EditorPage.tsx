@@ -68,6 +68,7 @@ export default function EditorPage() {
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 })
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [magicSelectMode, setMagicSelectMode] = useState(false)
+  const [zoomMultiplier, setZoomMultiplier] = useState(1)
 
   const { extractAtPoint } = useSAM()
 
@@ -107,6 +108,10 @@ export default function EditorPage() {
   // Keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && magicSelectMode) {
+        setMagicSelectMode(false)
+        return
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault()
         if (e.shiftKey) redo()
@@ -130,7 +135,7 @@ export default function EditorPage() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [undo, redo, removeLayer, duplicateLayer, selectedLayerId])
+  }, [undo, redo, removeLayer, duplicateLayer, selectedLayerId, magicSelectMode])
 
   const handleExport = useCallback(
     async (format: ExportFormat) => {
@@ -294,8 +299,32 @@ export default function EditorPage() {
         {/* Spacer */}
         <div className="flex-1" />
 
+        {/* Zoom controls */}
+        <div className="hidden md:flex items-center gap-1">
+          <ToolbarButton
+            icon={ZoomOut}
+            label=""
+            onClick={() => setZoomMultiplier((z) => Math.max(0.25, +(z - 0.25).toFixed(2)))}
+          />
+          <span className="text-xs text-neutral-600 w-10 text-center font-medium">
+            {Math.round(zoomMultiplier * 100)}%
+          </span>
+          <ToolbarButton
+            icon={ZoomIn}
+            label=""
+            onClick={() => setZoomMultiplier((z) => Math.min(3, +(z + 0.25).toFixed(2)))}
+          />
+          <ToolbarButton
+            icon={Maximize2}
+            label="Fit"
+            onClick={() => setZoomMultiplier(1)}
+          />
+        </div>
+
+        <div className="h-5 w-px bg-neutral-200 hidden md:block" />
+
         {/* Canvas info */}
-        <span className="text-xs text-zinc-400 hidden sm:block">
+        <span className="text-xs text-neutral-400 hidden sm:block">
           {canvasWidth} × {canvasHeight}px
         </span>
 
@@ -348,10 +377,16 @@ export default function EditorPage() {
               <ProcessingOverlay progress={processing} />
             </div>
           )}
+          {magicSelectMode && !isProcessing && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 px-3 py-1.5 rounded-full bg-black text-white text-xs font-medium shadow-md pointer-events-none">
+              Click any object to separate (Esc to cancel)
+            </div>
+          )}
           <CanvasEditor
             containerWidth={containerSize.width}
             containerHeight={containerSize.height}
             stageRef={stageRef}
+            zoomMultiplier={zoomMultiplier}
             magicSelectMode={magicSelectMode}
             onMagicPointClick={async (x, y) => {
               await extractAtPoint(x, y)
