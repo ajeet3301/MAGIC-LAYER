@@ -1,33 +1,51 @@
-# React + TypeScript + Vite
+# Magic Layer
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+**Turn Any Image Into Editable Layers.**
 
-Currently, two official plugins are available:
+## About
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+**Magic Layer** is a browser-based, AI-powered image editing platform that turns flat images into independently editable layers. Inspired by tools like Canva Magic Layers, Remove.bg, and Photoshop, it separates foreground subjects, secondary graphic elements, and text while reconstructing the background behind them.
 
-## React Compiler
+Everything runs **100% locally in your browser** using WebAssembly/WebGPU and HTML5 Canvas — no backend server, no database, no API keys, and no account required.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Features
 
-## Expanding the Oxlint configuration
+- **AI Background Remover (`/background-remover`)**
+  - On-device background removal powered by `@imgly/background-removal` (`isnet_quint8`)
+  - Interactive before/after comparison slider and zoom controls
+  - Lossless transparent PNG download
+- **Magic Layers (`/magic-layers`)**
+  - Extracts salient foreground subjects into separate transparent layers via connected-component grouping
+  - Detects residual sharp-edged graphic elements (logos, badges, shapes)
+  - Extracts text into editable text layers via `tesseract.js` OCR (with ink color and weight estimation)
+  - Reconstructs missing background areas behind separated objects and text using multi-scale diffusion inpainting
+- **Layer Editor (`/editor`)**
+  - Interactive Konva.js canvas with move, resize, and rotate handles
+  - Layers panel (reorder, show/hide, lock/unlock, duplicate, delete, add text)
+  - Properties panel (X/Y, width/height, rotation, opacity, font size, weight, color, alignment, letter spacing)
+  - Undo/Redo history and keyboard shortcuts (`Ctrl/Cmd+Z`, `Ctrl/Cmd+Y`, `Ctrl/Cmd+D`, `Delete`)
+- **Export Options**
+  - **PNG** & **JPG** full composition export
+  - **PSD (`.psd`)** multi-layered Photoshop export via `ag-psd`
+  - **ZIP** archive containing all individual image layers
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+## Tech Stack
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS, React Router
+- **Canvas & State:** Konva (`konva`, `react-konva`), Zustand
+- **On-Device AI & Processing:** `@imgly/background-removal`, `tesseract.js`
+- **Export:** `ag-psd`, `jszip`
+- **Icons:** `lucide-react`
+
+## Getting Started
+
+```bash
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
-# MAGIC-LAYER 
+Build for production:
+
+```bash
+npm run build
+```
