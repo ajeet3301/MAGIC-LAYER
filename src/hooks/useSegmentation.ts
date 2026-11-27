@@ -164,94 +164,188 @@ function extractForegroundObjects(
 }
 
 /**
- * Crop a full-canvas RGBA image URL (e.g. from Qwen-Image-Layered) to its tight
- * non-transparent bounding box and scale to target canvas dimensions.
+ * Extract cohesive, sharp-edged secondary graphic elements (e.g. logos, badges, cards)
+ * from unmasked regions without picking up noisy background textures.
  */
-async function processQwenLayer(
-  url: string,
-  index: number,
-  targetWidth: number,
-  targetHeight: number
-): Promise<LayerItem | null> {
-  const res = await fetch(url)
-  const blob = await res.blob()
-  const localUrl = URL.createObjectURL(blob)
+function extractResidualElements(
+  origData: Uint8ClampedArray,
+  existingMask: Uint8Array,
+  width: number,
+  height: number
+): { layers: LayerItem[]; mask: Uint8Array } {
+  const gw = Math.min(220, width)
+  const gh = Math.max(16, Math.round((height / width) * gw))
 
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image()
-      el.onload = () => resolve(el)
-      el.onerror = reject
-      el.src = localUrl
-    })
+  const gray = new Float32Array(gw * gh)
+  const masked = new Uint8Array(gw * gh)
+  for (let y = 0; y < gh; y++) {
+    const oy = Math.min(height - 1, Math.floor((y / gh) * height))
+    for (let x = 0; x < gw; x++) {
+      const ox = Math.min(width - 1, Math.floor((x / gw) * width))
+      const oi = oy * width + ox
+      const p = oi * 4
+      gray[y * gw + x] = 0.299 * origData[p] + 0.587 * origData[p + 1] + 0.114 * origData[p + 2]
+      masked[y * gw + x] = existingMask[oi]
+    }
+  }
 
-    const canvas = document.createElement('canvas')
-    canvas.width = targetWidth
-    canvas.height = targetHeight
-    const ctx = canvas.getContext('2d')!
-    ctx.drawImage(img, 0, 0, targetWidth, targetHeight)
-
-    // Bottom layer (index 0) is typically the background
-    if (index === 0) {
-      return {
-        id: generateId('qwen-bg'),
-        name: 'Background',
-        type: 'image',
-        visible: true,
-        locked: false,
-        opacity: 1,
-        x: 0,
-        y: 0,
-        width: targetWidth,
-        height: targetHeight,
-        rotation: 0,
-        imageData: canvas.toDataURL('image/png'),
+  const edgeBinary = new Uint8Array(gw * gh)
+  for (let y = 1; y < gh - 1; y++) {
+    for (let x = 1; x < gw - 1; x++) {
+      const i = y * gw + x
+      if (masked[i] === 1) continue
+      const gx =
+        -gray[(y - 1) * gw + (x - 1)] + gray[(y - 1) * gw + (x + 1)] -
+        2 * gray[y * gw + (x - 1)] + 2 * gray[y * gw + (x + 1)] -
+        gray[(y + 1) * gw + (x - 1)] + gray[(y + 1) * gw + (x + 1)]
+      const gy =
+        -gray[(y - 1) * gw + (x - 1)] - 2 * gray[(y - 1) * gw + x] - gray[(y - 1) * gw + (x + 1)] +
+        gray[(y + 1) * gw + (x - 1)] + 2 * gray[(y + 1) * gw + x] + gray[(y + 1) * gw + (x + 1)]
+      if (Math.sqrt(gx * gx + gy * gy) > 105) {
+        edgeBinary[i] = 1
       }
     }
+  }
 
-    const { data } = ctx.getImageData(0, 0, targetWidth, targetHeight)
-    let minX = targetWidth, minY = targetHeight, maxX = 0, maxY = 0
-    let opaqueCount = 0
+  const closed = dilateMask(edgeBinary, gw, gh, 2)
+  const labels = new Int32Array(gw * gh)
+  const candidates: ComponentBox[] = []
+  let currentLabel = 0
 
-    for (let y = 0; y < targetHeight; y++) {
-      for (let x = 0; x < targetWidth; x++) {
-        const a = data[(y * targetWidth + x) * 4 + 3]
-        if (a > 12) {
-          if (x < minX) minX = x
-          if (y < minY) minY = y
-          if (x > maxX) maxX = x
-          if (y > maxY) maxY = y
-          opaqueCount++
+  const qx = new Int32Array(gw * gh)
+  const qy = new Int32Array(gw * gh)
+
+  for (let y = 0; y < gh; y++) {
+    for (let x = 0; x < gw; x++) {
+      const idx = y * gw + x
+      if (closed[idx] === 1 && labels[idx] === 0 && masked[idx] === 0) {
+        currentLabel++
+        let head = 0, tail = 0
+        qx[tail] = x
+        qy[tail] = y
+        tail++
+        labels[idx] = currentLabel
+
+        let minX = x, minY = y, maxX = x, maxY = y, area = 0
+        while (head < tail) {
+          const cx = qx[head]
+          const cy = qy[head]
+          head++
+          area++
+          if (cx < minX) minX = cx
+          if (cy < minY) minY = cy
+          if (cx > maxX) maxX = cx
+          if (cy > maxY) maxY = cy
+
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue
+              const nx = cx + dx, ny = cy + dy
+              if (nx >= 0 && nx < gw && ny >= 0 && ny < gh) {
+                const nIdx = ny * gw + nx
+                if (closed[nIdx] === 1 && labels[nIdx] === 0 && masked[nIdx] === 0) {
+                  labels[nIdx] = currentLabel
+                  qx[tail] = nx
+                  qy[tail] = ny
+                  tail++
+                }
+              }
+            }
+          }
+        }
+
+        const boxArea = (maxX - minX + 1) * (maxY - minY + 1)
+        const totalArea = gw * gh
+        if (boxArea >= totalArea * 0.012 && boxArea <= totalArea * 0.16 && area / boxArea > 0.38) {
+          candidates.push({ id: currentLabel, minX, minY, maxX, maxY, area: boxArea })
+        }
+      }
+    }
+  }
+
+  candidates.sort((a, b) => b.area - a.area)
+  const topCandidates = candidates.slice(0, 3)
+
+  const addedMask = new Uint8Array(existingMask)
+  const layers: LayerItem[] = []
+
+  for (let i = 0; i < topCandidates.length; i++) {
+    const comp = topCandidates[i]
+    const x0 = Math.max(0, Math.floor((comp.minX / gw) * width))
+    const y0 = Math.max(0, Math.floor((comp.minY / gh) * height))
+    const x1 = Math.min(width - 1, Math.ceil(((comp.maxX + 1) / gw) * width))
+    const y1 = Math.min(height - 1, Math.ceil(((comp.maxY + 1) / gh) * height))
+
+    const bw = x1 - x0 + 1
+    const bh = y1 - y0 + 1
+    if (bw < 20 || bh < 20) continue
+
+    let bgR = 0, bgG = 0, bgB = 0, bgCount = 0
+    for (let x = x0; x <= x1; x++) {
+      for (const y of [y0, y1]) {
+        const p = (y * width + x) * 4
+        bgR += origData[p]
+        bgG += origData[p + 1]
+        bgB += origData[p + 2]
+        bgCount++
+      }
+    }
+    bgR /= Math.max(1, bgCount)
+    bgG /= Math.max(1, bgCount)
+    bgB /= Math.max(1, bgCount)
+
+    const cropCanvas = document.createElement('canvas')
+    cropCanvas.width = bw
+    cropCanvas.height = bh
+    const cropCtx = cropCanvas.getContext('2d')!
+    const cropImg = cropCtx.createImageData(bw, bh)
+    const out = cropImg.data
+
+    let fgPixels = 0
+    for (let y = 0; y < bh; y++) {
+      const oy = y0 + y
+      for (let x = 0; x < bw; x++) {
+        const ox = x0 + x
+        const oi = oy * width + ox
+        if (existingMask[oi] === 1) continue
+        const p = oi * 4
+        const dist = Math.sqrt(
+          (origData[p] - bgR) ** 2 +
+          (origData[p + 1] - bgG) ** 2 +
+          (origData[p + 2] - bgB) ** 2
+        )
+        if (dist > 36) {
+          const dst = (y * bw + x) * 4
+          out[dst] = origData[p]
+          out[dst + 1] = origData[p + 1]
+          out[dst + 2] = origData[p + 2]
+          out[dst + 3] = Math.min(255, Math.round((dist - 36) * 4))
+          addedMask[oi] = 1
+          fgPixels++
         }
       }
     }
 
-    if (opaqueCount < 16 || minX >= maxX || minY >= maxY) return null
+    if (fgPixels < bw * bh * 0.15) continue
+    cropCtx.putImageData(decontaminateEdges(cropImg), 0, 0)
 
-    const bw = maxX - minX + 1
-    const bh = maxY - minY + 1
-    const cropCanvas = document.createElement('canvas')
-    cropCanvas.width = bw
-    cropCanvas.height = bh
-    cropCanvas.getContext('2d')!.drawImage(canvas, minX, minY, bw, bh, 0, 0, bw, bh)
-
-    return {
-      id: generateId('qwen-layer'),
-      name: `Layer ${index}`,
+    layers.push({
+      id: generateId('elem'),
+      name: `Element ${i + 1}`,
       type: 'image',
       visible: true,
       locked: false,
       opacity: 1,
-      x: minX,
-      y: minY,
+      x: x0,
+      y: y0,
       width: bw,
       height: bh,
       rotation: 0,
       imageData: cropCanvas.toDataURL('image/png'),
-    }
-  } finally {
-    URL.revokeObjectURL(localUrl)
+    })
   }
+
+  return { layers, mask: addedMask }
 }
 
 function analyzeAndMaskText(
@@ -320,12 +414,12 @@ function analyzeAndMaskText(
 }
 
 export function useSegmentation() {
-  const { setProcessing, setLayers, setCanvasSize, setOriginalImageUrl, pushHistory } =
+  const { setProcessing, setLayers, setSelectedLayerId, setCanvasSize, setOriginalImageUrl, pushHistory } =
     useEditorStore()
   const abortRef = useRef(false)
 
   const segmentImage = useCallback(
-    async (file: File, targetLayers = 4): Promise<boolean> => {
+    async (file: File): Promise<boolean> => {
       abortRef.current = false
 
       try {
@@ -351,82 +445,6 @@ export function useSegmentation() {
         const height = img.naturalHeight
         setCanvasSize(width, height)
 
-        // Primary: Qwen/Qwen-Image-Layered via public Gradio Space (free, no API key)
-        try {
-          setProcessing({
-            status: 'processing',
-            message: 'Magic start…',
-            percentage: 20,
-          })
-
-          const { Client, handle_file } = await import('@gradio/client')
-          const client = await Client.connect('Qwen/Qwen-Image-Layered')
-
-          if (abortRef.current) return false
-
-          setProcessing({
-            status: 'processing',
-            message: 'Magic happening…',
-            percentage: 45,
-          })
-
-          const prediction = (await Promise.race([
-            client.predict('/infer_1', {
-              input_image: handle_file(file),
-              seed: 0,
-              randomize_seed: true,
-              prompt: '',
-              neg_prompt: ' ',
-              true_guidance_scale: 4.0,
-              num_inference_steps: 28,
-              layer: Math.max(2, Math.min(10, targetLayers)),
-              cfg_norm: true,
-              use_en_prompt: true,
-            }),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Qwen Space timeout')), 90000)
-            ),
-          ])) as { data: unknown[] }
-
-          if (abortRef.current) return false
-
-          const gallery = Array.isArray(prediction?.data?.[0])
-            ? (prediction.data[0] as Array<{ image?: { url?: string } }>)
-            : []
-
-          if (gallery.length >= 2) {
-            setProcessing({
-              status: 'processing',
-              message: 'Magic doing…',
-              percentage: 80,
-            })
-
-            const qwenLayers: LayerItem[] = []
-            for (let i = 0; i < gallery.length; i++) {
-              const url = gallery[i]?.image?.url
-              if (!url) continue
-              const item = await processQwenLayer(url, i, width, height)
-              if (item) qwenLayers.push(item)
-            }
-
-            if (qwenLayers.length >= 2) {
-              pushHistory()
-              setLayers(qwenLayers)
-              setProcessing({
-                status: 'done',
-                message: `Separated ${qwenLayers.length} layers`,
-                percentage: 100,
-              })
-              return true
-            }
-          }
-        } catch (qwenErr) {
-          console.warn('Qwen-Image-Layered unavailable, using local fallback:', qwenErr)
-        }
-
-        if (abortRef.current) return false
-
-        // Fallback: Local on-device pipeline (ISNet + OCR + Background Inpainting)
         const origCanvas = document.createElement('canvas')
         origCanvas.width = width
         origCanvas.height = height
@@ -434,6 +452,7 @@ export function useSegmentation() {
         origCtx.drawImage(img, 0, 0)
         const origData = origCtx.getImageData(0, 0, width, height).data
 
+        // Step 1: AI Foreground Segmentation (ISNet)
         let fgData: Uint8ClampedArray | null = null
         try {
           const { removeBackground } = await import('@imgly/background-removal')
@@ -445,8 +464,8 @@ export function useSegmentation() {
               const pct = total > 0 ? Math.round((current / total) * 100) : 0
               setProcessing({
                 status: key.includes('fetch') || key.includes('download') ? 'loading-model' : 'processing',
-                message: 'Magic doing…',
-                percentage: Math.min(65, Math.round(30 + pct * 0.35)),
+                message: key.includes('fetch') || key.includes('download') ? 'Magic start…' : 'Magic doing…',
+                percentage: Math.min(55, Math.round(10 + pct * 0.45)),
               })
             },
           })
@@ -474,8 +493,15 @@ export function useSegmentation() {
 
         if (abortRef.current) return false
 
+        // Step 2: Separate salient foreground objects
+        setProcessing({
+          status: 'processing',
+          message: 'Magic happening…',
+          percentage: 62,
+        })
+
         let objectLayers: LayerItem[] = []
-        const combinedMask = new Uint8Array(width * height)
+        let combinedMask: Uint8Array = new Uint8Array(width * height)
 
         if (fgData) {
           for (let i = 0; i < width * height; i++) {
@@ -484,10 +510,16 @@ export function useSegmentation() {
           objectLayers = extractForegroundObjects(fgData, origData, width, height)
         }
 
+        // Step 3: Residual graphic/shape element extraction
+        const residual = extractResidualElements(origData, combinedMask, width, height)
+        const elementLayers = residual.layers
+        combinedMask = residual.mask
+
+        // Step 4: OCR Text Extraction + Text Ink Masking
         setProcessing({
           status: 'processing',
-          message: 'Magic happening…',
-          percentage: 82,
+          message: 'Magic doing…',
+          percentage: 78,
         })
 
         const textLayers: LayerItem[] = []
@@ -547,6 +579,14 @@ export function useSegmentation() {
 
         if (abortRef.current) return false
 
+        // Step 5: Reconstruct Background behind all objects, elements, and text
+        setProcessing({
+          status: 'processing',
+          message: 'Magic happening…',
+          percentage: 92,
+        })
+        await new Promise((r) => setTimeout(r, 20))
+
         const dilatedMask = dilateMask(combinedMask, width, height, 3)
         const hasMaskPixels = dilatedMask.some((v) => v === 1)
 
@@ -555,7 +595,7 @@ export function useSegmentation() {
         bgCanvas.height = height
         const bgCtx = bgCanvas.getContext('2d')!
 
-        if (hasMaskPixels && (objectLayers.length > 0 || textLayers.length > 0)) {
+        if (hasMaskPixels && (objectLayers.length > 0 || elementLayers.length > 0 || textLayers.length > 0)) {
           const inpainted = inpaintBackground(origData, dilatedMask, width, height)
           bgCtx.putImageData(inpainted, 0, 0)
         } else {
@@ -567,7 +607,7 @@ export function useSegmentation() {
           name: 'Background',
           type: 'image',
           visible: true,
-          locked: false,
+          locked: true, // Lock background by default like Canva so objects are easy to drag
           opacity: 1,
           x: 0,
           y: 0,
@@ -579,6 +619,7 @@ export function useSegmentation() {
 
         const allLayers: LayerItem[] = [
           backgroundLayer,
+          ...elementLayers,
           ...objectLayers,
           ...textLayers,
         ]
@@ -586,9 +627,14 @@ export function useSegmentation() {
         pushHistory()
         setLayers(allLayers)
 
+        // Auto-select the first foreground object or text layer
+        const firstEditable = objectLayers[0] ?? elementLayers[0] ?? textLayers[0]
+        if (firstEditable) setSelectedLayerId(firstEditable.id)
+
+        const totalExtracted = objectLayers.length + elementLayers.length
         setProcessing({
           status: 'done',
-          message: `Separated ${objectLayers.length} object${objectLayers.length !== 1 ? 's' : ''}${
+          message: `Separated ${totalExtracted} layer${totalExtracted !== 1 ? 's' : ''}${
             textLayers.length > 0 ? ` + ${textLayers.length} text` : ''
           }`,
           percentage: 100,
@@ -605,7 +651,7 @@ export function useSegmentation() {
         return false
       }
     },
-    [setProcessing, setLayers, setCanvasSize, setOriginalImageUrl, pushHistory]
+    [setProcessing, setLayers, setSelectedLayerId, setCanvasSize, setOriginalImageUrl, pushHistory]
   )
 
   const cancel = useCallback(() => {
