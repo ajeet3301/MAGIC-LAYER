@@ -10,6 +10,7 @@ import { useEditorStore } from '../store/editorStore'
 export default function MagicLayersPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [fileName, setFileName] = useState('')
+  const [layerCount, setLayerCount] = useState(4)
   const navigate = useNavigate()
 
   const { segmentImage } = useSegmentation()
@@ -40,13 +41,13 @@ export default function MagicLayersPage() {
     const blob = await response.blob()
     const file = new File([blob], fileName || 'image.png', { type: blob.type })
 
-    const success = await segmentImage(file)
+    const success = await segmentImage(file, layerCount)
     if (success) {
       setTimeout(() => {
         navigate('/editor')
       }, 800)
     }
-  }, [previewUrl, fileName, segmentImage, navigate])
+  }, [previewUrl, fileName, layerCount, segmentImage, navigate])
 
   const isProcessing =
     processing.status === 'processing' || processing.status === 'loading-model'
@@ -92,6 +93,21 @@ export default function MagicLayersPage() {
                 <div className="px-5 py-3.5 border-t border-neutral-200 flex flex-col sm:flex-row items-center justify-between gap-3">
                   <div className="text-xs text-neutral-500 truncate max-w-xs">{fileName}</div>
                   <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 text-xs text-neutral-600">
+                      <span>Layers:</span>
+                      <select
+                        value={layerCount}
+                        onChange={(e) => setLayerCount(Number(e.target.value))}
+                        disabled={isProcessing || isDone}
+                        className="border border-neutral-300 rounded px-1.5 py-1 text-xs text-black bg-white"
+                      >
+                        {[3, 4, 5, 6, 8].map((n) => (
+                          <option key={n} value={n}>
+                            {n}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <label
                       htmlFor="ml-new-file"
                       className="text-xs text-neutral-600 hover:text-black cursor-pointer font-medium"
