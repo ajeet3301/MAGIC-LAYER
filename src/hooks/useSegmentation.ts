@@ -16,28 +16,42 @@ interface ComponentBox {
   area: number
 }
 
+/**
+ * Refine raw ISNet alpha to eliminate faint background ghosts while keeping smooth anti-aliased edges.
+ */
+function refineAlpha(rawAlpha: number): number {
+  if (rawAlpha < 24) return 0
+  if (rawAlpha >= 230) return 255
+  const t = (rawAlpha - 24) / (230 - 24)
+  // Smoothstep curve tightens hazy edges without harsh stair-stepping
+  const smooth = t * t * (3 - 2 * t)
+  return Math.round(smooth * 255)
+}
+
 function extractForegroundObjects(
   fgData: Uint8ClampedArray,
   origData: Uint8ClampedArray,
   width: number,
   height: number
-): LayerItem[] {
-  const gridMax = 360
+): { layers: LayerItem[]; mask: Uint8Array } {
+  const gridMax = 380
   const scale = Math.min(1, gridMax / Math.max(width, height))
   const gw = Math.max(16, Math.round(width * scale))
   const gh = Math.max(16, Math.round(height * scale))
 
+  // Core foreground mask (high confidence pixels only)
   const binary = new Uint8Array(gw * gh)
   for (let gy = 0; gy < gh; gy++) {
     const oy = Math.min(height - 1, Math.floor((gy / gh) * height))
     for (let gx = 0; gx < gw; gx++) {
       const ox = Math.min(width - 1, Math.floor((gx / gw) * width))
-      if (fgData[(oy * width + ox) * 4 + 3] > 28) {
+      if (fgData[(oy * width + ox) * 4 + 3] >= 90) {
         binary[gy * gw + gx] = 1
       }
     }
   }
 
+  // Slight bridge (1px) to keep closely connected body/object parts together
   const bridged = dilateMask(binary, gw, gh, 1)
   const labels = new Int32Array(gw * gh)
   const components: ComponentBox[] = []
@@ -88,7 +102,8 @@ function extractForegroundObjects(
           }
         }
 
-        if (area >= gw * gh * 0.0025) {
+        // Ignore tiny noise specks (< 0.8% of image area)
+        if (area >= gw * gh * 0.008) {
           components.push({ id: currentLabel, minX, minY, maxX, maxY, area })
         }
       }
@@ -98,7 +113,8 @@ function extractForegroundObjects(
   components.sort((a, b) => a.minX - b.minX)
 
   const layers: LayerItem[] = []
-  const pad = Math.max(2, Math.round(4 / scale))
+  const mask = new Uint8Array(width * height)
+  const pad = Math.max(4, Math.round(6 / scale))
 
   for (let i = 0; i < components.length; i++) {
     const comp = components[i]
@@ -109,7 +125,7 @@ function extractForegroundObjects(
 
     const bw = x1 - x0 + 1
     const bh = y1 - y0 + 1
-    if (bw < 4 || bh < 4) continue
+    if (bw < 16 || bh < 16) continue
 
     const cropCanvas = document.createElement('canvas')
     cropCanvas.width = bw
@@ -125,18 +141,37 @@ function extractForegroundObjects(
       for (let x = 0; x < bw; x++) {
         const ox = x0 + x
         const gx = Math.min(gw - 1, Math.floor((ox / width) * gw))
-        const label = labels[gy * gw + gx]
+
+        // Check 3x3 neighborhood on grid so anti-aliased fringe around core mask is included
+        let belongs = labels[gy * gw + gx] === comp.id
+        if (!belongs) {
+          for (let dy = -1; dy <= 1 && !belongs; dy++) {
+            const ngy = gy + dy
+            if (ngy < 0 || ngy >= gh) continue
+            for (let dx = -1; dx <= 1; dx++) {
+              const ngx = gx + dx
+              if (ngx >= 0 && ngx < gw && labels[ngy * gw + ngx] === comp.id) {
+                belongs = true
+                break
+              }
+            }
+          }
+        }
+
+        if (!belongs) continue
 
         const srcIdx = (oy * width + ox) * 4
-        const dstIdx = (y * bw + x) * 4
-        const alpha = fgData[srcIdx + 3]
-
-        if (label === comp.id && alpha > 12) {
+        const alpha = refineAlpha(fgData[srcIdx + 3])
+        if (alpha > 12) {
+          const dstIdx = (y * bw + x) * 4
           out[dstIdx] = origData[srcIdx]
           out[dstIdx + 1] = origData[srcIdx + 1]
           out[dstIdx + 2] = origData[srcIdx + 2]
           out[dstIdx + 3] = alpha
           hasVisiblePixels = true
+          if (alpha >= 48) {
+            mask[oy * width + ox] = 1
+          }
         }
       }
     }
@@ -160,12 +195,12 @@ function extractForegroundObjects(
     })
   }
 
-  return layers
+  return { layers, mask }
 }
 
 /**
- * Extract cohesive, sharp-edged secondary graphic elements (e.g. logos, badges, cards)
- * from unmasked regions without picking up noisy background textures.
+ * Extract cohesive graphic elements (logos, badges, UI cards) ONLY when they sit
+ * on a uniform background (low border color variance), preventing noisy cutouts on photos.
  */
 function extractResidualElements(
   origData: Uint8ClampedArray,
@@ -201,7 +236,7 @@ function extractResidualElements(
       const gy =
         -gray[(y - 1) * gw + (x - 1)] - 2 * gray[(y - 1) * gw + x] - gray[(y - 1) * gw + (x + 1)] +
         gray[(y + 1) * gw + (x - 1)] + 2 * gray[(y + 1) * gw + x] + gray[(y + 1) * gw + (x + 1)]
-      if (Math.sqrt(gx * gx + gy * gy) > 105) {
+      if (Math.sqrt(gx * gx + gy * gy) > 120) {
         edgeBinary[i] = 1
       }
     }
@@ -256,7 +291,7 @@ function extractResidualElements(
 
         const boxArea = (maxX - minX + 1) * (maxY - minY + 1)
         const totalArea = gw * gh
-        if (boxArea >= totalArea * 0.012 && boxArea <= totalArea * 0.16 && area / boxArea > 0.38) {
+        if (boxArea >= totalArea * 0.012 && boxArea <= totalArea * 0.16 && area / boxArea > 0.42) {
           candidates.push({ id: currentLabel, minX, minY, maxX, maxY, area: boxArea })
         }
       }
@@ -278,8 +313,9 @@ function extractResidualElements(
 
     const bw = x1 - x0 + 1
     const bh = y1 - y0 + 1
-    if (bw < 20 || bh < 20) continue
+    if (bw < 24 || bh < 24) continue
 
+    // Compute mean & std-dev of the border pixels to verify uniform background
     let bgR = 0, bgG = 0, bgB = 0, bgCount = 0
     for (let x = x0; x <= x1; x++) {
       for (const y of [y0, y1]) {
@@ -293,6 +329,20 @@ function extractResidualElements(
     bgR /= Math.max(1, bgCount)
     bgG /= Math.max(1, bgCount)
     bgB /= Math.max(1, bgCount)
+
+    let varSum = 0
+    for (let x = x0; x <= x1; x++) {
+      for (const y of [y0, y1]) {
+        const p = (y * width + x) * 4
+        varSum +=
+          (origData[p] - bgR) ** 2 +
+          (origData[p + 1] - bgG) ** 2 +
+          (origData[p + 2] - bgB) ** 2
+      }
+    }
+    const borderStdDev = Math.sqrt(varSum / Math.max(1, bgCount))
+    // Skip textured photographic regions (sky/buildings/trees) so we don't make noisy Swiss-cheese cutouts
+    if (borderStdDev > 22) continue
 
     const cropCanvas = document.createElement('canvas')
     cropCanvas.width = bw
@@ -319,7 +369,7 @@ function extractResidualElements(
           out[dst] = origData[p]
           out[dst + 1] = origData[p + 1]
           out[dst + 2] = origData[p + 2]
-          out[dst + 3] = Math.min(255, Math.round((dist - 36) * 4))
+          out[dst + 3] = Math.min(255, Math.round((dist - 36) * 4.5))
           addedMask[oi] = 1
           fgPixels++
         }
@@ -331,7 +381,7 @@ function extractResidualElements(
 
     layers.push({
       id: generateId('elem'),
-      name: `Element ${i + 1}`,
+      name: `Element ${layers.length + 1}`,
       type: 'image',
       visible: true,
       locked: false,
@@ -379,11 +429,21 @@ function analyzeAndMaskText(
     bgB /= bgCount
   }
 
+  let bgVar = 0
+  for (let x = cx0; x <= cx1; x++) {
+    for (const y of [cy0, cy1]) {
+      const i = (y * width + x) * 4
+      bgVar += (origData[i] - bgR) ** 2 + (origData[i + 1] - bgG) ** 2 + (origData[i + 2] - bgB) ** 2
+    }
+  }
+  const bgStdDev = Math.sqrt(bgVar / Math.max(1, bgCount))
+
   let maxDist = -1
   let bestR = 0, bestG = 0, bestB = 0
   let inkCount = 0
   const totalPixels = Math.max(1, (cx1 - cx0 + 1) * (cy1 - cy0 + 1))
 
+  const candidateInk: number[] = []
   for (let y = cy0; y <= cy1; y++) {
     for (let x = cx0; x <= cx1; x++) {
       const oi = y * width + x
@@ -393,8 +453,8 @@ function analyzeAndMaskText(
         (origData[i + 1] - bgG) ** 2 +
         (origData[i + 2] - bgB) ** 2
       )
-      if (dist > 38) {
-        mask[oi] = 1
+      if (dist > 40) {
+        candidateInk.push(oi)
         inkCount++
       }
       if (dist > maxDist) {
@@ -406,10 +466,17 @@ function analyzeAndMaskText(
     }
   }
 
+  const inkRatio = inkCount / totalPixels
+  if (bgStdDev < 45 && inkRatio >= 0.04 && inkRatio <= 0.65) {
+    for (const oi of candidateInk) {
+      mask[oi] = 1
+    }
+  }
+
   const toHex = (n: number) => Math.round(n).toString(16).padStart(2, '0')
   return {
     fill: `#${toHex(bestR)}${toHex(bestG)}${toHex(bestB)}`,
-    isBold: inkCount / totalPixels > 0.28,
+    isBold: inkRatio > 0.28,
   }
 }
 
@@ -504,13 +571,12 @@ export function useSegmentation() {
         let combinedMask: Uint8Array = new Uint8Array(width * height)
 
         if (fgData) {
-          for (let i = 0; i < width * height; i++) {
-            if (fgData[i * 4 + 3] > 28) combinedMask[i] = 1
-          }
-          objectLayers = extractForegroundObjects(fgData, origData, width, height)
+          const extracted = extractForegroundObjects(fgData, origData, width, height)
+          objectLayers = extracted.layers
+          combinedMask = extracted.mask
         }
 
-        // Step 3: Residual graphic/shape element extraction
+        // Step 3: Residual graphic/shape element extraction (uniform-background badges/logos only)
         const residual = extractResidualElements(origData, combinedMask, width, height)
         const elementLayers = residual.layers
         combinedMask = residual.mask
@@ -535,11 +601,14 @@ export function useSegmentation() {
 
           for (const line of lines) {
             const cleanText = line.text.trim()
-            if (!cleanText || line.confidence < 60) continue
+            if (!cleanText || line.confidence < 72 || cleanText.length > 80) continue
+            if (!/[a-zA-Z0-9]{2,}/.test(cleanText)) continue
+
             const { x0, y0, x1, y1 } = line.bbox
             const boxW = Math.round(x1 - x0)
             const boxH = Math.round(y1 - y0)
-            if (boxW < 12 || boxH < 10) continue
+            if (boxW < 16 || boxH < 12) continue
+            if (boxW > width * 0.85 && boxH > height * 0.5) continue
 
             const { fill, isBold } = analyzeAndMaskText(
               origData,

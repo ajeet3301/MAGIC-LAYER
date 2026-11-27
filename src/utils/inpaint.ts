@@ -30,36 +30,43 @@ export function decontaminateEdges(imageData: ImageData): ImageData {
   const { width, height, data } = imageData
   const copy = new Uint8ClampedArray(data)
 
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
       const idx = (y * width + x) * 4
       const alpha = data[idx + 3]
-      if (alpha > 10 && alpha < 225) {
+      if (alpha > 8 && alpha < 235) {
         let bestAlpha = alpha
+        let bestDist = 999
         let bestR = data[idx]
         let bestG = data[idx + 1]
         let bestB = data[idx + 2]
 
-        for (let dy = -2; dy <= 2; dy++) {
+        for (let dy = -4; dy <= 4; dy++) {
           const ny = y + dy
           if (ny < 0 || ny >= height) continue
-          for (let dx = -2; dx <= 2; dx++) {
+          for (let dx = -4; dx <= 4; dx++) {
             const nx = x + dx
             if (nx < 0 || nx >= width) continue
             const nIdx = (ny * width + nx) * 4
-            if (data[nIdx + 3] > bestAlpha) {
-              bestAlpha = data[nIdx + 3]
-              bestR = data[nIdx]
-              bestG = data[nIdx + 1]
-              bestB = data[nIdx + 2]
+            const nAlpha = data[nIdx + 3]
+            if (nAlpha >= 175) {
+              const d = dx * dx + dy * dy
+              if (nAlpha > bestAlpha || (nAlpha === bestAlpha && d < bestDist)) {
+                bestAlpha = nAlpha
+                bestDist = d
+                bestR = data[nIdx]
+                bestG = data[nIdx + 1]
+                bestB = data[nIdx + 2]
+              }
             }
           }
         }
 
-        if (bestAlpha >= 200) {
-          copy[idx] = bestR
-          copy[idx + 1] = bestG
-          copy[idx + 2] = bestB
+        if (bestAlpha >= 175) {
+          const blend = Math.min(1, (235 - alpha) / 140)
+          copy[idx] = Math.round(data[idx] * (1 - blend) + bestR * blend)
+          copy[idx + 1] = Math.round(data[idx + 1] * (1 - blend) + bestG * blend)
+          copy[idx + 2] = Math.round(data[idx + 2] * (1 - blend) + bestB * blend)
         }
       }
     }
@@ -69,8 +76,7 @@ export function decontaminateEdges(imageData: ImageData): ImageData {
 }
 
 /**
- * Multi-scale pyramid diffusion inpainting with local texture synthesis
- * and feathered boundary blending.
+ * Multi-scale pyramid diffusion inpainting with feathered boundary blending.
  */
 export function inpaintBackground(
   origData: Uint8ClampedArray,
@@ -78,7 +84,7 @@ export function inpaintBackground(
   width: number,
   height: number
 ): ImageData {
-  const maxDim = 360
+  const maxDim = 480
   const scale = Math.min(1, maxDim / Math.max(width, height))
   const sw = Math.max(16, Math.round(width * scale))
   const sh = Math.max(16, Math.round(height * scale))
@@ -114,9 +120,11 @@ export function inpaintBackground(
   const dy = [-1, -1, -1, 0, 0, 1, 1, 1]
   const dw = [0.7, 1, 0.7, 1, 1, 0.7, 1, 0.7]
 
+  // Inward onion-peel diffusion
   let remaining = 1
   let iter = 0
-  while (remaining > 0 && iter < Math.max(sw, sh)) {
+  const maxIter = Math.max(sw, sh) * 2
+  while (remaining > 0 && iter < maxIter) {
     remaining = 0
     for (let y = 0; y < sh; y++) {
       for (let x = 0; x < sw; x++) {
@@ -159,8 +167,8 @@ export function inpaintBackground(
     iter++
   }
 
-  // Smooth inpainted structure (8 passes)
-  for (let pass = 0; pass < 8; pass++) {
+  // Smooth inpainted structure (14 passes for clean gradient continuity)
+  for (let pass = 0; pass < 14; pass++) {
     for (let y = 1; y < sh - 1; y++) {
       for (let x = 1; x < sw - 1; x++) {
         const si = y * sw + x
@@ -188,7 +196,7 @@ export function inpaintBackground(
     sB.set(nextB)
   }
 
-  // Estimate local texture variance from unmasked pixels to add natural grain
+  // Compute distance from known boundary for feathered 2px blending
   const out = new ImageData(width, height)
   const outData = out.data
 
@@ -227,7 +235,7 @@ export function inpaintBackground(
 
       // Subtle deterministic micro-grain so inpainted areas don't look plastic
       const hash = (((x * 73856093) ^ (y * 19349663)) & 255) / 255 - 0.5
-      const grain = hash * 4
+      const grain = hash * 2.5
 
       const baseR = sR[i00] * w00 + sR[i10] * w10 + sR[i01] * w01 + sR[i11] * w11 + grain
       const baseG = sG[i00] * w00 + sG[i10] * w10 + sG[i01] * w01 + sG[i11] * w11 + grain
